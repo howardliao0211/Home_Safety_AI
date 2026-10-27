@@ -1,0 +1,202 @@
+export type Profile = "Older adult" | "Child" | "Baby" | "Pet";
+export const profiles: Profile[] = ["Older adult", "Child", "Baby", "Pet"];
+export type Scenario =
+  | "hazards"
+  | "uncertain"
+  | "clear"
+  | "analysis-error"
+  | "update-error"
+  | "permission-denied";
+export const scenarios: { id: Scenario; title: string; description: string }[] =
+  [
+    {
+      id: "hazards",
+      title: "Everyday hazards",
+      description: "Three findings, a photo follow-up and a text question.",
+    },
+    {
+      id: "uncertain",
+      title: "A closer look",
+      description: "One uncertain finding to investigate.",
+    },
+    {
+      id: "clear",
+      title: "No obvious hazards",
+      description: "A qualified empty result.",
+    },
+    {
+      id: "analysis-error",
+      title: "Analysis retry",
+      description: "First attempt fails; manual retry succeeds.",
+    },
+    {
+      id: "update-error",
+      title: "Follow-up / review retry",
+      description: "Each new linked submission fails once, then succeeds.",
+    },
+    {
+      id: "permission-denied",
+      title: "Camera permission denied",
+      description: "Simulated denial; gallery and samples remain available.",
+    },
+  ];
+export type Photo = {
+  id: string;
+  label: string;
+  sample?: "living" | "quiet";
+  uri?: string;
+};
+export type Draft = { photo?: Photo; profiles: Profile[]; scenario: Scenario };
+export type FindingStatus = "open" | "resolved" | "dismissed";
+export type OperationStatus = "ready" | "running" | "failed" | "complete";
+export type Submission = {
+  id: string;
+  kind: "follow-up" | "review";
+  status: OperationStatus;
+  attempts: number;
+  text: string;
+  photo?: Photo;
+  error?: string;
+  feedback?: string;
+};
+export type Finding = {
+  id: string;
+  title: string;
+  category: string;
+  severity: "High" | "Medium" | "Low";
+  evidence: string;
+  recommendation: string;
+  shortAction: string;
+  uncertainty: string;
+  status: FindingStatus;
+  note: string;
+  followUp?: {
+    kind: "photo" | "text";
+    question: string;
+    state: "available" | "skipped" | "answered";
+  };
+  submissions: Submission[];
+};
+export type Assessment = {
+  id: string;
+  createdAt: string;
+  photo: Photo;
+  profiles: Profile[];
+  scenario: Scenario;
+  status: OperationStatus;
+  attempts: number;
+  error?: string;
+  findings: Finding[];
+};
+export type AppState = {
+  version: 1;
+  assessments: Assessment[];
+  draft: Draft | null;
+  nextScenario: Scenario;
+};
+export const emptyState = (): AppState => ({
+  version: 1,
+  assessments: [],
+  draft: null,
+  nextScenario: "hazards",
+});
+export const makeId = () =>
+  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+export function createAssessment(draft: Draft): Assessment {
+  if (!draft.photo) throw new Error("Choose a room photo first.");
+  return {
+    id: makeId(),
+    createdAt: new Date().toISOString(),
+    photo: draft.photo,
+    profiles: [...draft.profiles],
+    scenario: draft.scenario,
+    status: "ready",
+    attempts: 0,
+    findings: [],
+  };
+}
+export function latest(state: AppState) {
+  return state.assessments.at(-1);
+}
+export function destination(assessment: Assessment) {
+  return assessment.status === "complete"
+    ? `/assessment/${assessment.id}`
+    : `/analysis/${assessment.id}`;
+}
+export function counts(findings: Finding[]) {
+  return {
+    open: findings.filter((f) => f.status === "open").length,
+    resolved: findings.filter((f) => f.status === "resolved").length,
+    dismissed: findings.filter((f) => f.status === "dismissed").length,
+  };
+}
+export function ordered(findings: Finding[]) {
+  const rank = { High: 0, Medium: 1, Low: 2 };
+  return [...findings].sort(
+    (a, b) =>
+      Number(a.status !== "open") - Number(b.status !== "open") ||
+      rank[a.severity] - rank[b.severity],
+  );
+}
+export function retainedPhotos(state: AppState): Photo[] {
+  return [
+    state.draft?.photo,
+    ...state.assessments.flatMap((a) => [
+      a.photo,
+      ...a.findings.flatMap((f) => f.submissions.map((s) => s.photo)),
+    ]),
+  ].filter((p): p is Photo => !!p);
+}
+export function recoverInterrupted(state: AppState): AppState {
+  return {
+    ...state,
+    assessments: state.assessments.map((a) => ({
+      ...a,
+      ...(a.status === "running"
+        ? {
+            status: "failed" as const,
+            error:
+              "The preview was interrupted. Your photo is saved. Retry when you’re ready.",
+          }
+        : {}),
+      findings: a.findings.map((f) => ({
+        ...f,
+        submissions: f.submissions.map((s) =>
+          s.status === "running"
+            ? {
+                ...s,
+                status: "failed" as const,
+                error:
+                  "This check was interrupted. Your input is saved. Retry when you’re ready.",
+              }
+            : s,
+        ),
+      })),
+    })),
+  };
+}
+export function completeSubmission(
+  finding: Finding,
+  submissionId: string,
+  feedback: string,
+): Finding {
+  const submission = finding.submissions.find((s) => s.id === submissionId);
+  if (!submission) throw new Error("This submission is no longer available.");
+  return {
+    ...finding,
+    // A check revises the finding's explanation, never the user's status.
+    uncertainty:
+      submission.kind === "follow-up"
+        ? "The sample response adds context, but a photo or text answer cannot establish that the concern is resolved."
+        : finding.uncertainty,
+    followUp:
+      submission.kind === "follow-up" && finding.followUp
+        ? { ...finding.followUp, state: "answered" }
+        : finding.followUp,
+    submissions: finding.submissions.map((s) =>
+      s.id === submissionId
+        ? { ...s, status: "complete", error: undefined, feedback }
+        : s,
+    ),
+  };
+}
