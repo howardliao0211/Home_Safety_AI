@@ -4,11 +4,6 @@ Home Safety AI is a mobile-first assistant that uses room photos to identify
 potential visible hazards, request clarifying evidence, and produce an actionable
 checklist. It provides guidance, not a professional inspection or safety certification.
 
-This is the current project context, distilled from
-`Home_Safety_AI_MVP_Handoff.md` and subsequent project decisions. The original
-handoff remains as historical reference; the decisions recorded here take
-precedence where they differ. Unresolved items below are not implementation commitments.
-
 ## MVP goal
 
 Deliver a working phone-to-cloud demonstration within one week:

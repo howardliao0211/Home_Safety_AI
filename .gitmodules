@@ -1,0 +1,3 @@
+[submodule ".codex/skills/mobile-design"]
+	path = .codex/skills/mobile-design
+	url = https://github.com/RubenGlez/mobile-design.git
