@@ -1,1 +1,10 @@
 .env
+.env.*
+!.env.example
+.tools/
+node_modules/
+.expo/
+dist/
+web-build/
+*.tsbuildinfo
+npm-debug.log*

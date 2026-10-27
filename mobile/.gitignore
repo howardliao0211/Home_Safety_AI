@@ -1,0 +1,11 @@
+android/
+ios/
+.kotlin/
+expo-env.d.ts
+.metro-health-check*
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.mobileprovision
