@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     storage_emulator_host: str | None = None
     photos_bucket: str = "home-safety-local-photos"
     demo_bearer_token: SecretStr | None = None
+    cors_origins: list[str] = []
 
     @model_validator(mode="after")
     def validate_environment(self):
@@ -41,4 +42,6 @@ class Settings(BaseSettings):
         else:
             self.firestore_emulator_host = self.firestore_emulator_host or "127.0.0.1:8080"
             self.storage_emulator_host = self.storage_emulator_host or "http://127.0.0.1:4443"
+            if not self.cors_origins:
+                self.cors_origins = ["http://localhost:8081", "http://127.0.0.1:8081"]
         return self

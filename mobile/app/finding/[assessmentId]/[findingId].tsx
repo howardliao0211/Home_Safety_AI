@@ -1,3 +1,4 @@
+import { apiEnabled } from "@/api/config";
 import { useState } from "react";
 import { TextInput, View } from "react-native";
 import { Redirect, router, useLocalSearchParams } from "expo-router";
@@ -49,7 +50,9 @@ export default function FindingScreen() {
       </View>
       <PhotoView photo={assessment.photo} compact />
       <PreviewNotice />
-      <Section title="What the sample describes">
+      <Section
+        title={apiEnabled ? "Visible evidence" : "What the sample describes"}
+      >
         <Copy>{finding.evidence}</Copy>
       </Section>
       <Section title="A practical next step">
@@ -93,7 +96,9 @@ export default function FindingScreen() {
             <Copy kind="small">
               {finding.followUp.state === "skipped"
                 ? "You skipped this request. Uncertainty remains; you can still request a photo review."
-                : "Follow-up received. The sample finding was updated; you decide its status."}
+                : apiEnabled
+                  ? "Follow-up received. The finding was updated; you decide its status."
+                  : "Follow-up received. The sample finding was updated; you decide its status."}
             </Copy>
           )}
         </Panel>
@@ -104,8 +109,12 @@ export default function FindingScreen() {
           <Panel key={s.id}>
             <Copy kind="eyebrow">
               {s.kind === "review"
-                ? "SIMULATED PHOTO REVIEW"
-                : "SIMULATED FOLLOW-UP UPDATE"}
+                ? apiEnabled
+                  ? "AI PHOTO REVIEW"
+                  : "SIMULATED PHOTO REVIEW"
+                : apiEnabled
+                  ? "AI FOLLOW-UP UPDATE"
+                  : "SIMULATED FOLLOW-UP UPDATE"}
             </Copy>
             {s.photo && <PhotoView photo={s.photo} compact />}
             {!!s.text && (
@@ -144,7 +153,11 @@ export default function FindingScreen() {
             })
           }
         />
-        <Copy kind="small">Photo review is simulated in this preview.</Copy>
+        <Copy kind="small">
+          {apiEnabled
+            ? "A review adds evidence; you decide whether to resolve the finding."
+            : "Photo review is simulated in this preview."}
+        </Copy>
         {finding.status === "open" && !dismissing && (
           <Button
             label="Dismiss as not relevant"

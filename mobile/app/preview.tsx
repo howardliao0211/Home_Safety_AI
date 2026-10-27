@@ -1,3 +1,4 @@
+import { apiEnabled } from "@/api/config";
 import { useState } from "react";
 import { Pressable, View } from "react-native";
 import { Redirect, router } from "expo-router";
@@ -11,7 +12,7 @@ export default function PreviewTools() {
   const { state, busy, update, startDraft, reset, discardDraft } = usePreview();
   const [resetting, setResetting] = useState(false);
   const [replacing, setReplacing] = useState(false);
-  if (!__DEV__) return <Redirect href="/" />;
+  if (!__DEV__ || apiEnabled) return <Redirect href="/" />;
   async function freshDemo() {
     if (state.draft) {
       setReplacing(true);

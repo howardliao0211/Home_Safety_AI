@@ -1,3 +1,4 @@
+import { apiEnabled } from "@/api/config";
 import { useEffect, useState } from "react";
 import { Redirect, router } from "expo-router";
 import { usePreview } from "@/hooks/preview-context";
@@ -52,7 +53,7 @@ export default function ConfirmScreen() {
         </Copy>
       </Notice>
       <Button
-        label="Create sample assessment"
+        label={apiEnabled ? "Create assessment" : "Create sample assessment"}
         icon="arrow"
         disabled={invalid}
         onPress={() =>

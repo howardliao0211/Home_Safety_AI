@@ -1,3 +1,4 @@
+import { apiEnabled } from "@/api/config";
 import { useState } from "react";
 import { View } from "react-native";
 import { Redirect, router, useLocalSearchParams } from "expo-router";
@@ -37,14 +38,21 @@ export default function AssessmentScreen() {
       </View>
       <View style={{ gap: 12 }}>
         <Copy kind="title" accessibilityRole="header">
-          {total ? "Your room checklist." : "Nothing obvious\nin this sample."}
+          {total
+            ? "Your room checklist."
+            : apiEnabled
+              ? "No obvious visible hazards."
+              : "Nothing obvious\nin this sample."}
         </Copy>
         <Copy style={{ color: colors.muted }}>
           {total
             ? `${total} potential concerns. Start with what matters most to your household.`
-            : "This sample returned no obvious visible hazards. It is not a declaration that the room is safe."}
+            : apiEnabled
+              ? "No obvious visible hazards were identified. This is not a declaration that the room is safe."
+              : "This sample returned no obvious visible hazards. It is not a declaration that the room is safe."}
         </Copy>
       </View>
+      {assessment.summary && <Copy>{assessment.summary}</Copy>}
       <PhotoView photo={assessment.photo} compact />
       <Copy kind="small">
         {new Date(assessment.createdAt).toLocaleDateString("en-AU", {
@@ -104,9 +112,9 @@ export default function AssessmentScreen() {
           {tally.open === 0 && (
             <Notice title="You’ve reviewed every finding" tone="success">
               <Copy>
-                Your decisions are saved. This checklist covers only these
-                sample findings and does not certify the room’s safety. You can
-                reopen any item.
+                {apiEnabled
+                  ? "Your decisions are saved. These findings do not certify the room’s safety. You can reopen any item."
+                  : "Your decisions are saved. This checklist covers only these sample findings and does not certify the room’s safety. You can reopen any item."}
               </Copy>
             </Notice>
           )}
@@ -148,7 +156,11 @@ export default function AssessmentScreen() {
       <ConfirmDialog
         visible={deleting}
         title="Delete this assessment?"
-        message="Its checklist and all initial, follow-up, and review photos will be removed from this device. This cannot be undone."
+        message={
+          apiEnabled
+            ? "Its checklist and all associated photos will be removed from the service and this device. This cannot be undone."
+            : "Its checklist and all initial, follow-up, and review photos will be removed from this device. This cannot be undone."
+        }
         confirm="Delete assessment and photos"
         onCancel={() => setDeleting(false)}
         onConfirm={() =>

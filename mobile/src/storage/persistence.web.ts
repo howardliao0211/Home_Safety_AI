@@ -1,4 +1,5 @@
 import type { AppState } from "../domain/model";
+import { stateKey } from "../api/config";
 
 // IndexedDB retains selected image data across reloads without localStorage's
 // small synchronous quota. Metadata and photos commit in one transaction.
@@ -26,7 +27,7 @@ export const persistence = {
     const db = await open();
     return new Promise((resolve, reject) => {
       const transaction = db.transaction("preview", "readonly");
-      const request = transaction.objectStore("preview").get("state");
+      const request = transaction.objectStore("preview").get(stateKey);
       transaction.oncomplete = () => resolve(request.result ?? null);
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () =>
@@ -39,7 +40,7 @@ export const persistence = {
     const db = await open();
     return new Promise((resolve, reject) => {
       const transaction = db.transaction("preview", "readwrite");
-      transaction.objectStore("preview").put(state, "state");
+      transaction.objectStore("preview").put(state, stateKey);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () =>

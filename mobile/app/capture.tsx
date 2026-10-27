@@ -1,3 +1,4 @@
+import { apiEnabled } from "@/api/config";
 import { useState } from "react";
 import { Pressable, View } from "react-native";
 import { Redirect, router } from "expo-router";
@@ -121,7 +122,11 @@ export default function CaptureScreen() {
       <ConfirmDialog
         visible={!!leave}
         title="Discard this submission?"
-        message="This draft and its photo will be removed. Your earlier assessments will stay on this device."
+        message={
+          apiEnabled
+            ? "This unsent draft and its photo will be removed. Earlier assessments remain saved."
+            : "This draft and its photo will be removed. Your earlier assessments will stay on this device."
+        }
         confirm="Discard draft"
         onCancel={() => setLeave(null)}
         onConfirm={() => {

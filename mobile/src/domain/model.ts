@@ -45,6 +45,8 @@ export type Photo = {
   label: string;
   sample?: "living" | "quiet";
   uri?: string;
+  remote?: { assessmentId: string; photoId: string };
+  serverUploaded?: boolean;
 };
 export type Draft = { photo?: Photo; profiles: Profile[]; scenario: Scenario };
 export type FindingStatus = "open" | "resolved" | "dismissed";
@@ -58,6 +60,8 @@ export type Submission = {
   photo?: Photo;
   error?: string;
   feedback?: string;
+  serverSaved?: boolean;
+  frozen?: boolean;
 };
 export type Finding = {
   id: string;
@@ -87,6 +91,8 @@ export type Assessment = {
   attempts: number;
   error?: string;
   findings: Finding[];
+  summary?: string;
+  serverSaved?: boolean;
 };
 export type AppState = {
   version: 1;

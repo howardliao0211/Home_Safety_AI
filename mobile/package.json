@@ -6,7 +6,9 @@
     "@expo/metro-runtime": "~57.0.17",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.31",
+    "expo-asset": "~57.0.20",
     "expo-constants": "~57.0.22",
+    "expo-crypto": "~57.0.4",
     "expo-file-system": "~57.0.7",
     "expo-font": "~57.0.4",
     "expo-image": "~57.0.5",
@@ -41,6 +43,7 @@
     "start:tunnel": "expo start --tunnel",
     "test": "tsx --test tests/*.test.ts",
     "test:e2e": "playwright test",
+    "test:e2e:api": "playwright test -c playwright.api.config.ts",
     "format": "prettier --write app src tests playwright.config.ts"
   },
   "private": true

@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.api.cors import ConfiguredCORS
 from app.api.routes import router
 from app.assessments.service import AssessmentService
 from app.config import Settings
@@ -104,6 +105,7 @@ def create_app(settings=None, repository=None, photos=None, provider=None) -> Fa
         )
 
     app.include_router(router)
+    app.add_middleware(ConfiguredCORS)
     return app
 
 

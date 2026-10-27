@@ -1,3 +1,4 @@
+import { apiEnabled } from "@/api/config";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { Redirect, useLocalSearchParams, router } from "expo-router";
@@ -37,13 +38,27 @@ export default function AnalysisScreen() {
     (assessment.status === "running" && !busy);
   return (
     <Screen>
-      <Step number={3} label="Sample assessment" />
+      <Step
+        number={3}
+        label={apiEnabled ? "Room assessment" : "Sample assessment"}
+      />
       <Copy kind="title" accessibilityRole="header">
-        {failed ? "Let’s try that again." : "Preparing your sample checklist."}
+        {failed
+          ? "Let’s try that again."
+          : apiEnabled
+            ? "Reviewing your room."
+            : "Preparing your sample checklist."}
       </Copy>
       <PhotoView photo={assessment.photo} />
       {failed ? (
-        <Notice title="The preview could not finish" tone="error">
+        <Notice
+          title={
+            apiEnabled
+              ? "The analysis could not finish"
+              : "The preview could not finish"
+          }
+          tone="error"
+        >
           <Copy>
             {assessment.error ||
               "The result could not be saved. Your input is still here."}
@@ -60,7 +75,9 @@ export default function AnalysisScreen() {
         >
           <ActivityIndicator color={colors.accent} size="large" />
           <Copy accessibilityLiveRegion="polite">
-            Loading a predefined example. Your photo is not sent anywhere.
+            {apiEnabled
+              ? "Analysing visible information in your room photo. Your input is saved if you need to retry."
+              : "Loading a predefined example. Your photo is not sent anywhere."}
           </Copy>
         </View>
       )}
@@ -87,7 +104,11 @@ export default function AnalysisScreen() {
       <ConfirmDialog
         visible={deleting}
         title="Delete this assessment?"
-        message="This failed assessment and its retained photo will be removed from this device."
+        message={
+          apiEnabled
+            ? "This assessment and its photos will be removed from the service and this device."
+            : "This failed assessment and its retained photo will be removed from this device."
+        }
         confirm="Delete assessment and photos"
         onCancel={() => setDeleting(false)}
         onConfirm={() =>

@@ -1,7 +1,14 @@
 import { Directory, File, Paths } from "expo-file-system";
 import type { Photo } from "../domain/model";
+import { apiConfig, apiEnabled } from "../api/config";
 
-const directory = () => new Directory(Paths.document, "preview-photos");
+const directory = () =>
+  new Directory(
+    Paths.document,
+    apiEnabled
+      ? `api-photos-${encodeURIComponent(apiConfig.baseUrl)}`
+      : "preview-photos",
+  );
 export async function retainPhoto(photo: Photo): Promise<Photo> {
   if (!photo.uri || photo.sample) return photo;
   const folder = directory();

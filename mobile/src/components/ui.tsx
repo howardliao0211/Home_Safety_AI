@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -17,6 +17,9 @@ import { usePreview } from "@/hooks/preview-context";
 import type { Photo } from "@/domain/model";
 import { Icon, type IconName } from "@/components/icon";
 import { colors, tokens } from "@/components/theme";
+import { apiEnabled } from "@/api/config";
+import { roomSources } from "@/domain/samples";
+export { roomSources } from "@/domain/samples";
 
 export function Copy({
   children,
@@ -187,11 +190,14 @@ export function PreviewNotice() {
     <View style={styles.preview}>
       <View style={styles.row}>
         <View style={styles.previewDot} />
-        <Copy kind="eyebrow">INTERACTIVE PREVIEW</Copy>
+        <Copy kind="eyebrow">
+          {apiEnabled ? "AI ASSESSMENT" : "INTERACTIVE PREVIEW"}
+        </Copy>
       </View>
       <Copy kind="small">
-        Results are predefined examples. Your selected photo is not being
-        analysed.
+        {apiEnabled
+          ? "Photos are sent for AI analysis when you submit. Review the suggestions and decide what needs attention."
+          : "Results are predefined examples. Your selected photo is not being analysed."}
       </Copy>
     </View>
   );
@@ -241,10 +247,6 @@ export function Panel({
 }) {
   return <View style={[styles.panel, style]}>{children}</View>;
 }
-export const roomSources = {
-  living: require("../../assets/rooms/living-room.jpg"),
-  quiet: require("../../assets/rooms/quiet-room.jpg"),
-};
 export function PhotoView({
   photo,
   compact = false,
@@ -255,11 +257,42 @@ export function PhotoView({
   onInvalid?: () => void;
 }) {
   const [failed, setFailed] = useState(false);
-  const source = photo.sample
-    ? roomSources[photo.sample]
-    : photo.uri
-      ? { uri: photo.uri }
-      : undefined;
+  const [remoteUri, setRemoteUri] = useState<string>();
+  const [preferRemote, setPreferRemote] = useState(false);
+  const { loadRemotePhoto } = usePreview();
+  const needsRemote =
+    !!photo.remote && (preferRemote || (!photo.uri && !photo.sample));
+  useEffect(() => {
+    let cancelled = false;
+    if (needsRemote && photo.remote) {
+      void loadRemotePhoto(photo.remote)
+        .then((uri) => {
+          if (!cancelled) setRemoteUri(uri);
+        })
+        .catch(() => {
+          if (!cancelled) setFailed(true);
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [needsRemote, photo.remote?.assessmentId, photo.remote?.photoId]);
+  if (needsRemote && !remoteUri && !failed)
+    return (
+      <ActivityIndicator
+        accessibilityLabel="Loading saved photo"
+        color={colors.accent}
+      />
+    );
+  const source = needsRemote
+    ? remoteUri
+      ? { uri: remoteUri }
+      : undefined
+    : photo.sample
+      ? roomSources[photo.sample]
+      : photo.uri
+        ? { uri: photo.uri }
+        : undefined;
   if (failed || !source)
     return (
       <Notice title="Photo unavailable" tone="error">
@@ -283,6 +316,10 @@ export function PhotoView({
         }}
         contentFit="cover"
         onError={() => {
+          if (photo.remote && !needsRemote) {
+            setPreferRemote(true);
+            return;
+          }
           setFailed(true);
           onInvalid?.();
         }}

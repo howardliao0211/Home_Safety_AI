@@ -5,6 +5,7 @@ import * as ImagePicker from "expo-image-picker";
 import { makeId, type Photo } from "@/domain/model";
 import { usePreview } from "@/hooks/preview-context";
 import { colors } from "@/components/theme";
+import { apiEnabled } from "@/api/config";
 import {
   Button,
   Copy,
@@ -19,13 +20,16 @@ export function PhotoInput({
   onChange,
   denyCamera = false,
   onInvalid,
+  disabled = false,
 }: {
   photo?: Photo;
   onChange: (photo: Photo) => Promise<unknown>;
   denyCamera?: boolean;
   onInvalid?: () => void;
+  disabled?: boolean;
 }) {
-  const { busy } = usePreview();
+  const { busy: working } = usePreview();
+  const busy = working || disabled;
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState<string>();
   const [denied, setDenied] = useState(false);
@@ -69,10 +73,14 @@ export function PhotoInput({
         throw new Error(
           "This image could not be read. Choose another photo or a sample.",
         );
-      if ((asset.fileSize ?? 0) > 15 * 1024 * 1024)
+      if ((asset.fileSize ?? 0) > (apiEnabled ? 10 : 15) * 1024 * 1024)
         throw new Error(
-          "Choose a photo smaller than 15 MB for this local preview.",
+          apiEnabled
+            ? "Choose a photo smaller than 10 MiB."
+            : "Choose a photo smaller than 15 MB for this local preview.",
         );
+      if (apiEnabled && asset.width * asset.height > 20_000_000)
+        throw new Error("Choose a photo under 20 megapixels.");
       await onChange({
         id: makeId(),
         label: camera
@@ -80,9 +88,11 @@ export function PhotoInput({
           : asset.fileName || "Your room photo",
         uri: asset.uri,
       });
-    } catch {
+    } catch (cause) {
       setError(
-        "The photo could not be opened. Camera capture may be unavailable here. Choose a photo or use a sample.",
+        cause instanceof Error
+          ? cause.message
+          : "The photo could not be opened. Choose a photo or use a sample.",
       );
     } finally {
       setPicking(false);
@@ -95,7 +105,9 @@ export function PhotoInput({
       )}
       <Copy kind="small">
         Take a wide view of the room in good light. Only capture what you’re
-        comfortable keeping on this device.
+        {apiEnabled
+          ? "comfortable sending for analysis."
+          : "comfortable keeping on this device."}
       </Copy>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
         <View style={{ flex: 1, minWidth: 135 }}>

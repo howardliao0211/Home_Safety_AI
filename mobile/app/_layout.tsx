@@ -1,3 +1,4 @@
+import { apiEnabled } from "@/api/config";
 import { useEffect, useState } from "react";
 import { AccessibilityInfo, ActivityIndicator, View } from "react-native";
 import { Stack, router } from "expo-router";
@@ -30,17 +31,24 @@ function Navigation() {
         }}
       >
         <Copy kind="heading">
-          {error ? "Local data is unavailable" : "Opening your home checklist…"}
+          {error
+            ? apiEnabled
+              ? "Could not open your checklist"
+              : "Local data is unavailable"
+            : "Opening your home checklist…"}
         </Copy>
         {error ? (
           <>
             <Copy>{error}</Copy>
             <Copy kind="small">
-              Your existing data has not been cleared. Check available storage
-              and try again.
+              {apiEnabled
+                ? "Your saved input has not been cleared. Check your connection and retry."
+                : "Your existing data has not been cleared. Check available storage and try again."}
             </Copy>
             <Button
-              label="Retry opening local data"
+              label={
+                apiEnabled ? "Retry connecting" : "Retry opening local data"
+              }
               onPress={() => void initialize()}
               disabled={busy}
             />
@@ -60,7 +68,7 @@ function Navigation() {
         contentStyle: { backgroundColor: colors.background },
         animation: reduceMotion ? "none" : "default",
         headerRight: () =>
-          __DEV__ ? (
+          __DEV__ && !apiEnabled ? (
             <Button
               label="Preview tools"
               shortLabel="Preview"

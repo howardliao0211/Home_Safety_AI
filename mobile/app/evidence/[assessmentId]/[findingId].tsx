@@ -1,3 +1,4 @@
+import { apiEnabled } from "@/api/config";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, TextInput, View } from "react-native";
 import { Redirect, router, useLocalSearchParams } from "expo-router";
@@ -91,11 +92,16 @@ export default function EvidenceScreen() {
       <PreviewNotice />
       <Copy>
         {kind === "review"
-          ? "Add a new photo linked to this finding. The simulated feedback will not mark it resolved."
+          ? apiEnabled
+            ? "Add a new photo linked to this finding. AI feedback will not mark it resolved."
+            : "Add a new photo linked to this finding. The simulated feedback will not mark it resolved."
           : finding.followUp?.question}
       </Copy>
       {feedback ? (
-        <Notice title="Simulated review received" tone="success">
+        <Notice
+          title={apiEnabled ? "Review received" : "Simulated review received"}
+          tone="success"
+        >
           <Copy>{feedback.feedback}</Copy>
           <Button
             label="Return to finding"
@@ -116,7 +122,7 @@ export default function EvidenceScreen() {
                 placeholder="Tell us how your household uses this area…"
                 placeholderTextColor={colors.muted}
                 multiline
-                editable={!busy}
+                editable={!busy && !(apiEnabled && submission?.frozen)}
                 style={styles.input}
               />
               <Copy kind="small">
@@ -126,6 +132,7 @@ export default function EvidenceScreen() {
           ) : (
             <PhotoInput
               photo={submission?.photo}
+              disabled={apiEnabled && submission?.frozen}
               onInvalid={() => setInvalidPhoto(true)}
               denyCamera={assessment.scenario === "permission-denied"}
               onChange={(photo) =>
@@ -137,9 +144,16 @@ export default function EvidenceScreen() {
             <View style={styles.row}>
               <ActivityIndicator color={colors.accent} />
               <Copy accessibilityLiveRegion="polite">
-                Preparing simulated feedback…
+                {apiEnabled
+                  ? "Checking the submitted evidence…"
+                  : "Preparing simulated feedback…"}
               </Copy>
             </View>
+          )}
+          {apiEnabled && submission?.frozen && (
+            <Copy kind="small">
+              Submitted evidence is saved. Retry sends the same evidence again.
+            </Copy>
           )}
           {submission?.error && (
             <Notice title="The check could not finish" tone="error">
@@ -157,7 +171,9 @@ export default function EvidenceScreen() {
               (submission?.status === "running" && !busy)
                 ? "Retry check"
                 : kind === "review"
-                  ? "Request sample photo review"
+                  ? apiEnabled
+                    ? "Request photo review"
+                    : "Request sample photo review"
                   : "Submit follow-up"
             }
             icon="arrow"
