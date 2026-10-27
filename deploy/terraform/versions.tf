@@ -15,7 +15,6 @@ terraform {
 provider "google" {
   project = var.project_id
   region  = var.region
-  zone    = var.zone
 
   # Attribute API quota for gcloud user tokens to this project.
   billing_project       = var.project_id

@@ -21,6 +21,21 @@ def create_app(settings=None, repository=None, photos=None, provider=None) -> Fa
     @asynccontextmanager
     async def lifespan(app):
         config = settings or Settings()
+        if config.environment == "production":
+            # Configuration is resolved at startup, including env-file settings.
+            # Remove the actual routes, not just their OpenAPI visibility.
+            documentation_paths = {
+                app.docs_url,
+                app.redoc_url,
+                app.openapi_url,
+                "/docs/oauth2-redirect",
+            }
+            app.router.routes[:] = [
+                route
+                for route in app.router.routes
+                if getattr(route, "path", None) not in documentation_paths
+            ]
+            app.docs_url = app.redoc_url = app.openapi_url = None
         with ExitStack() as stack:
             model = provider or build_provider(config)
             stack.callback(model.close)
@@ -81,7 +96,7 @@ def create_app(settings=None, repository=None, photos=None, provider=None) -> Fa
             content={
                 "error": {
                     "code": "invalid_request",
-                    "message": "Request fields are invalid. Check /docs for the API schema.",
+                    "message": "Request fields are invalid. Check the API field types and required values.",
                     "fields": [".".join(str(part) for part in e["loc"]) for e in exc.errors()],
                     "request_id": request.state.request_id,
                 }

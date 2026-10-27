@@ -1,14 +1,20 @@
+output "deployment_config" {
+  description = "Non-secret inputs consumed by scripts/deploy-gcp.py."
+  value = {
+    project_id      = var.project_id
+    region          = var.region
+    service_name    = "home-safety-demo"
+    repository      = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.backend.repository_id}"
+    service_account = google_service_account.backend.email
+    photos_bucket   = google_storage_bucket.photos.name
+    database_id     = google_firestore_database.assessments.name
+    groq_secret     = google_secret_manager_secret.backend["groq-api-key"].secret_id
+    demo_secret     = google_secret_manager_secret.backend["demo-bearer-token"].secret_id
+  }
+}
+
 output "project_id" {
   value = var.project_id
-}
-
-output "backend_ip" {
-  value = google_compute_address.backend.address
-}
-
-output "backend_url" {
-  description = "HTTPS endpoint; application routes require a deployed backend."
-  value       = "https://${google_compute_address.backend.address}"
 }
 
 output "photos_bucket" {
@@ -21,9 +27,4 @@ output "firestore_database" {
 
 output "backend_service_account" {
   value = google_service_account.backend.email
-}
-
-output "ssh_command" {
-  description = "Use the same Google account used for provisioning."
-  value       = "gcloud compute ssh ${google_compute_instance.backend.name} --project=${var.project_id} --zone=${var.zone} --tunnel-through-iap"
 }

@@ -221,7 +221,10 @@ Set `ENVIRONMENT=production`, the real `GOOGLE_CLOUD_PROJECT`,
 `FIRESTORE_DATABASE_ID`, `PHOTOS_BUCKET`, model settings, and `DEMO_BEARER_TOKEN`.
 Remove both emulator environment variables. Production rejects emulator endpoints
 and requires a bearer token. Google clients use Application Default Credentials
-from the VM service account; Terraform manages storage provisioning and private
-bucket configuration. The ASGI entry point is `app.main:app`, matching the VM's
-service template when the backend directory is deployed as its working directory.
-Cloud provisioning/deployment remains a later step; see [deploy/README.md](../deploy/README.md).
+from the Cloud Run service account; Terraform manages storage provisioning and
+private bucket configuration. The container binds `0.0.0.0:$PORT` and runs as a
+non-root user. Production disables `/docs`, `/redoc` and `/openapi.json`.
+
+Build locally with `docker build -t home-safety-backend:dev backend` from the repo
+root. See [deploy/README.md](../deploy/README.md) for separate Terraform provisioning,
+Secret Manager initialization, Cloud Run release verification and rollback.

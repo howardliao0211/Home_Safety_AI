@@ -141,7 +141,7 @@ Use `npm run format` to format the frontend source and tests.
 | `mobile/src/storage/` | Local persistence and photo retention |
 | `mobile/tests/` | State tests and browser journeys |
 | `backend/` | FastAPI assessment backend, Groq adapter, Firestore/GCS storage and tests |
-| `deploy/terraform/` | GCP demo infrastructure and VM setup |
+| `deploy/terraform/` | Shared Cloud Run infrastructure, storage, registry and secret IAM |
 
 Preview data stays in IndexedDB in the browser, or AsyncStorage and app-owned
 photo files on Android. Reloads retain assessments and checklist actions.
@@ -156,6 +156,6 @@ See the [backend development guide](backend/README.md) to run the real Groq-back
 API locally, inspect its endpoints, and prepare the future Muse integration.
 The mobile preview continues to use its simulated service.
 
-See the [backend infrastructure guide](deploy/README.md) for Terraform provisioning,
-HTTPS, storage access, and teardown. Provisioning infrastructure
-does not implement or deploy the assessment API.
+See the [Cloud Run deployment guide](deploy/README.md) for the production Docker
+image, separate Terraform provisioning, Secret Manager setup, verified releases
+and rollback. The deployment script is `scripts/deploy-gcp.py`.

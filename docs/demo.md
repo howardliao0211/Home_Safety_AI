@@ -155,3 +155,30 @@ The mobile app continues to use its simulated service. Phone-to-backend
 integration, cloud deployment, Muse integration and physical-device checks
 remain separate work. These tests establish integration/state behavior, not
 hazard-detection accuracy.
+
+## Cloud Run Docker workflow verification — 2026-10-28
+
+Cloud Run replaces the earlier VM hosting plan. The deployment guide is
+[deploy/README.md](../deploy/README.md); shared resources are provisioned with
+Terraform and `scripts/deploy-gcp.py` owns releases, traffic and rollback.
+
+Verified locally:
+
+- Built the production Linux AMD64 image from locked dependencies and pinned
+  Python/uv images. The runtime image is approximately 78 MB and runs as UID 10001.
+- Ran the image against local Firestore/GCS services using a custom `PORT` and
+  dummy model credentials. Authenticated health, photo/assessment CRUD, device
+  scoping, deletion and the internal Docker health check passed; no model call.
+- Ran the production image with synthetic test-only credentials, without cloud
+  operations. Missing/wrong bearer tokens were rejected, authenticated health
+  succeeded, and production documentation routes returned 404.
+- 45 backend/deployment/storage checks passed. The live model test was excluded
+  and the optional emulator-container restart check was skipped in this run.
+  Checks include secret stdin handling, candidate failure without promotion,
+  previous-traffic restoration after a failed promotion check, and using a
+  rollback revision's original secret version.
+- Ruff lint/format, Terraform formatting/validation and diff checks passed.
+
+No GCP provisioning, image push, Secret Manager update or Cloud Run deployment
+was performed. Actual cloud IAM, candidate URLs, public invocation and revision
+traffic changes still require a provisioned service and live release check.

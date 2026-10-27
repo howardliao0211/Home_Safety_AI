@@ -79,8 +79,10 @@ professional home safety inspection.”
 
 - Mobile: Expo / React Native, with Android first for the physical-device demo.
   iOS support is deferred.
-- Backend: FastAPI, including the assessment controller, on one GCP Compute Engine
-  `e2-small` VM in `us-central1-a`, project `home-safety-ai`, for the demo.
+- Backend: FastAPI, including the assessment controller, in a Docker container
+  on GCP Cloud Run in `us-central1`, project `home-safety-ai`. Start with 1 CPU,
+  2 GiB RAM, concurrency 2, minimum 0 and maximum 2 instances, and a 300-second
+  request timeout. Container images live in Artifact Registry.
 - Model integration: Meta Muse remains required for the final hackathon demo.
   Groq is explicitly permitted for development while Muse access is pending.
   Select the provider using `MODEL_PROVIDER`; Groq uses backend-only
@@ -92,7 +94,7 @@ professional home safety inspection.”
   adapter when its supplied contract arrives, then select it through configuration.
   Public API research does not determine this integration.
 - Persistence: Firestore Standard edition in Native mode, located in `us-central1`.
-  FastAPI accesses Firestore using the VM's dedicated service account; the mobile
+  FastAPI accesses Firestore using the dedicated Cloud Run service account; the mobile
   app accesses all assessment data through FastAPI. No SQLite or separate data disk.
   Local development uses the Firestore emulator and a GCS-compatible local service;
   preserve emulator data across graceful restarts. Cloud provisioning is deferred.
@@ -107,11 +109,12 @@ professional home safety inspection.”
   retain recoverable photo versions. Database and photo deletion are separate
   operations: the backend must make deletion retryable across both stores.
 - Credentials: model API keys remain on the backend and secrets stay out of Git.
-- Demo transport: HTTPS on a reserved public IP, with an automatically renewed
-  Let's Encrypt IP certificate and nginx proxying to localhost FastAPI. HTTP serves
-  certificate challenges only. A shared demo bearer token gates HTTPS access;
-  individual accounts and broader abuse controls remain outside the MVP scope.
-  The token does not replace the required per-device assessment scoping.
+- Demo transport: Cloud Run's managed HTTPS `run.app` endpoint. Public Cloud Run
+  invocation permits mobile access; FastAPI enforces a shared demo bearer token
+  and per-device assessment scoping. Production API docs are disabled. Google
+  sign-in, individual accounts and broader abuse controls remain outside the MVP.
+  API keys and the demo token use numbered Secret Manager versions; secret values
+  stay out of images and Terraform state. The image contains no local `.env`.
 - Infrastructure: Terraform configuration and provider lockfile are versioned in
   Git; Terraform state remains local and ignored, with private backups required.
   Deletion guards are removed by explicit user request: Firestore deletion protection
@@ -166,7 +169,9 @@ a no-hazards result.
   backend implements assessment workflows with a Groq development adapter and
   Firestore/GCS storage; mobile API integration is separate work. Local setup and
   the HTTP contract are documented in `backend/README.md`.
-  Terraform and VM setup live in `deploy/terraform/`.
+  Shared GCP resources live in `deploy/terraform/`; `scripts/deploy-gcp.py` owns
+  image releases, Cloud Run revisions/traffic, verification and rollback.
+  Provisioning and releases are separate; see `deploy/README.md`.
 
 ## Pending integration details
 
