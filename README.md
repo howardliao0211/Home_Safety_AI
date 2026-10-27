@@ -140,7 +140,7 @@ Use `npm run format` to format the frontend source and tests.
 | `mobile/src/hooks/` | Shared frontend state and actions |
 | `mobile/src/storage/` | Local persistence and photo retention |
 | `mobile/tests/` | State tests and browser journeys |
-| `backend/` | Placeholder for the planned FastAPI backend |
+| `backend/` | FastAPI assessment backend, Groq adapter, Firestore/GCS storage and tests |
 | `deploy/terraform/` | GCP demo infrastructure and VM setup |
 
 Preview data stays in IndexedDB in the browser, or AsyncStorage and app-owned
@@ -151,6 +151,10 @@ See the [frontend development guide](docs/frontend-development.md) for more
 detail, [demo notes](docs/demo.md) for verified behavior and pending device
 checks, and [CONTEXT.md](CONTEXT.md) for product requirements and the planned
 backend architecture.
+
+See the [backend development guide](backend/README.md) to run the real Groq-backed
+API locally, inspect its endpoints, and prepare the future Muse integration.
+The mobile preview continues to use its simulated service.
 
 See the [backend infrastructure guide](deploy/README.md) for Terraform provisioning,
 HTTPS, storage access, and teardown. Provisioning infrastructure

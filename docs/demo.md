@@ -108,3 +108,50 @@ npx expo export --platform web --platform android
 
 The browser runner starts or reuses a localhost Expo server on port 8081.
 Use `npm run format` to format frontend source and tests.
+
+## Backend verification — 2026-10-27
+
+The FastAPI backend now implements the assessment, linked follow-up/review,
+finding-status, retained-photo, latest-assessment, and deletion workflows.
+Grok (xAI) is the explicitly selected development provider; Muse awaits its actual
+API contract. Setup and the HTTP contract are in [backend/README.md](../backend/README.md).
+
+Verified:
+
+- 36 automated checks passed with workflow, provider-boundary, Firestore/GCS,
+  and container-restart checks enabled. The paid live-model test was excluded
+  from that passing run. Ruff lint and format checks passed.
+- Workflow checks cover failure retention, explicit retry, idempotent uploads
+  and analysis, per-device scoping, partial deletion retry, skipped follow-ups,
+  independent photo reviews, and preservation of user status and notes.
+- Actual Firestore/GCS SDK round trips passed, including fresh storage clients,
+  linked revisions, private photo retrieval, status persistence and deletion.
+- Both emulator containers were stopped and restarted. Assessment state and
+  photos survived. The Firestore launcher explicitly exports before stopping
+  Java and restores the last successful snapshot; the pinned emulator's native
+  shutdown export was unreliable in testing.
+- A running Uvicorn process passed HTTP checks for health, OpenAPI, upload,
+  latest assessment, photo retrieval and deletion using the existing `.env`.
+
+Groq is selected through `MODEL_PROVIDER=groq`, with backend-only
+`GROQ_API_KEY` and `GROQ_MODEL=qwen/qwen3.8-27b`. With the corrected credentials,
+a real room-photo assessment and a linked two-image photo review both returned
+HTTP 200 with validated structured output.
+
+Groq initially returned HTTP 429 for the linked review. Its input and the
+assessment findings were retained. An explicit manual retry of that same
+submission later returned HTTP 200 with feedback, without changing the user's
+finding status. The live test's two calls can still exceed a small development
+quota even with a one-minute gap. `LIVE_MODEL_INTERVAL_SECONDS` only paces the
+opt-in smoke test; the application has no automatic model retries.
+
+The restored Groq provider passed 38 workflow/provider/storage tests, including
+the Groq URL and authorization header, strict JSON request shape, safe failure
+handling, retained inputs, and user-controlled finding status. The two-call live
+pytest run hit quota limits; the successful live assessment/review/manual-retry
+sequence was verified separately against the real API and local storage.
+
+The mobile app continues to use its simulated service. Phone-to-backend
+integration, cloud deployment, Muse integration and physical-device checks
+remain separate work. These tests establish integration/state behavior, not
+hazard-detection accuracy.

@@ -81,15 +81,21 @@ professional home safety inspection.”
   iOS support is deferred.
 - Backend: FastAPI, including the assessment controller, on one GCP Compute Engine
   `e2-small` VM in `us-central1-a`, project `home-safety-ai`, for the demo.
-- Model integration: Meta Muse is required and is the only permitted model.
+- Model integration: Meta Muse remains required for the final hackathon demo.
+  Groq is explicitly permitted for development while Muse access is pending.
+  Select the provider using `MODEL_PROVIDER`; Groq uses backend-only
+  `GROQ_API_KEY` and `GROQ_MODEL`. There is no automatic provider fallback.
   The hackathon organisers will provide the Muse API. Defer exact model ID,
   endpoint, credentials, and API contract until their integration details arrive;
   do not assume the public Meta Model API or `muse-spark-1.3` is the supplied API.
-  There is no fallback to another model. Isolate the supplied API behind a
-  model adapter. Public API research does not determine this integration.
+  Isolate each API behind the shared model adapter interface. Implement the Muse
+  adapter when its supplied contract arrives, then select it through configuration.
+  Public API research does not determine this integration.
 - Persistence: Firestore Standard edition in Native mode, located in `us-central1`.
   FastAPI accesses Firestore using the VM's dedicated service account; the mobile
   app accesses all assessment data through FastAPI. No SQLite or separate data disk.
+  Local development uses the Firestore emulator and a GCS-compatible local service;
+  preserve emulator data across graceful restarts. Cloud provisioning is deferred.
 - Device scope: each app installation has a persistent `device_id`, without
   accounts or cross-device synchronisation. Scope assessment reads, uploads,
   updates, photo retrieval, and deletion by that identifier so the app shows
@@ -156,8 +162,11 @@ a no-hazards result.
 - `docs/agents/`: engineering skill configuration; `docs/adr/`: settled decisions
   that warrant an architecture decision record.
 - `.scratch/<feature>/`: local specs and individual implementation tickets.
-- The mobile preview is implemented with simulated assessments. The backend
-  application is not implemented. Terraform and VM setup live in `deploy/terraform/`.
+- The mobile preview uses simulated assessments and local state. The FastAPI
+  backend implements assessment workflows with a Groq development adapter and
+  Firestore/GCS storage; mobile API integration is separate work. Local setup and
+  the HTTP contract are documented in `backend/README.md`.
+  Terraform and VM setup live in `deploy/terraform/`.
 
 ## Pending integration details
 
