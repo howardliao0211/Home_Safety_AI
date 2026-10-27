@@ -8,3 +8,15 @@ dist/
 web-build/
 *.tsbuildinfo
 npm-debug.log*
+
+# Terraform configuration and .terraform.lock.hcl are versioned; state is local.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+crash.log
+crash.*.log
+__pycache__/

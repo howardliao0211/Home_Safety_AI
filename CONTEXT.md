@@ -79,24 +79,37 @@ professional home safety inspection.”
 
 - Mobile: Expo / React Native, with Android first for the physical-device demo.
   iOS support is deferred.
-- Backend: FastAPI, including the assessment controller, on a GCP Compute Engine VM.
+- Backend: FastAPI, including the assessment controller, on one GCP Compute Engine
+  `e2-small` VM in `us-central1-a`, project `home-safety-ai`, for the demo.
 - Model integration: Meta Muse is required and is the only permitted model.
   The hackathon organisers will provide the Muse API. Defer exact model ID,
   endpoint, credentials, and API contract until their integration details arrive;
   do not assume the public Meta Model API or `muse-spark-1.3` is the supplied API.
   There is no fallback to another model. Isolate the supplied API behind a
   model adapter. Public API research does not determine this integration.
-- Persistence: one shared SQLite database on the VM's persistent disk.
+- Persistence: Firestore Standard edition in Native mode, located in `us-central1`.
+  FastAPI accesses Firestore using the VM's dedicated service account; the mobile
+  app accesses all assessment data through FastAPI. No SQLite or separate data disk.
 - Device scope: each app installation has a persistent `device_id`, without
   accounts or cross-device synchronisation. Scope assessment reads, uploads,
   updates, photo retrieval, and deletion by that identifier so the app shows
   only that device's records. This is MVP record scoping, not authenticated identity.
 - Photo retention: retain initial, follow-up, and user-review photos with their
   assessment. User deletion removes the assessment and its associated photos.
+  Store photos in a private regional GCS bucket accessed by the backend only.
+  Disable object versioning and soft delete so app deletion does not deliberately
+  retain recoverable photo versions. Database and photo deletion are separate
+  operations: the backend must make deletion retryable across both stores.
 - Credentials: model API keys remain on the backend and secrets stay out of Git.
-- Initial development transport: direct HTTP to FastAPI. HTTPS setup is deferred;
-  no Caddy configuration is planned. Authentication and abuse controls are also
-  deferred from the initial MVP scope.
+- Demo transport: HTTPS on a reserved public IP, with an automatically renewed
+  Let's Encrypt IP certificate and nginx proxying to localhost FastAPI. HTTP serves
+  certificate challenges only. A shared demo bearer token gates HTTPS access;
+  individual accounts and broader abuse controls remain outside the MVP scope.
+  The token does not replace the required per-device assessment scoping.
+- Infrastructure: Terraform configuration and provider lockfile are versioned in
+  Git; Terraform state remains local and ignored, with private backups required.
+  Deletion guards are removed by explicit user request: Firestore deletion protection
+  is disabled and Terraform may delete the photos bucket, including its objects.
 
 The handoff's endpoint shapes and example JSON are proposals, not implemented
 contracts. The core operations are creating an assessment, submitting a linked
@@ -143,8 +156,8 @@ a no-hazards result.
 - `docs/agents/`: engineering skill configuration; `docs/adr/`: settled decisions
   that warrant an architecture decision record.
 - `.scratch/<feature>/`: local specs and individual implementation tickets.
-- The agreed directories are scaffolded with `.gitkeep`; application code has
-  not yet been implemented.
+- The mobile preview is implemented with simulated assessments. The backend
+  application is not implemented. Terraform and VM setup live in `deploy/terraform/`.
 
 ## Pending integration details
 

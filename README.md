@@ -140,7 +140,8 @@ Use `npm run format` to format the frontend source and tests.
 | `mobile/src/hooks/` | Shared frontend state and actions |
 | `mobile/src/storage/` | Local persistence and photo retention |
 | `mobile/tests/` | State tests and browser journeys |
-| `backend/`, `deploy/` | Placeholders for the planned backend and deployment |
+| `backend/` | Placeholder for the planned FastAPI backend |
+| `deploy/terraform/` | GCP demo infrastructure and VM setup |
 
 Preview data stays in IndexedDB in the browser, or AsyncStorage and app-owned
 photo files on Android. Reloads retain assessments and checklist actions.
@@ -150,3 +151,7 @@ See the [frontend development guide](docs/frontend-development.md) for more
 detail, [demo notes](docs/demo.md) for verified behavior and pending device
 checks, and [CONTEXT.md](CONTEXT.md) for product requirements and the planned
 backend architecture.
+
+See the [backend infrastructure guide](deploy/README.md) for Terraform provisioning,
+HTTPS, storage access, and teardown. Provisioning infrastructure
+does not implement or deploy the assessment API.
