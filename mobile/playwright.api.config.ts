@@ -9,7 +9,7 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:8082",
     viewport: { width: 390, height: 844 },
-    trace: "retain-on-failure",
+    trace: "off",
     screenshot: "only-on-failure",
     reducedMotion: "reduce",
   },

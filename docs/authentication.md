@@ -39,6 +39,8 @@ npm test
 npm run test:e2e:api
 ```
 
+The Auth emulator lacks the password-policy lookup endpoint, so emulator-mode
+registration validates the documented policy locally; production queries the provider.
 The connected browser suite uses real Auth/Firestore/GCS emulators and a deterministic
 model fixture. It never calls paid models. The isolated simulated preview remains
 `EXPO_PUBLIC_DATA_SOURCE=preview` and has its own assessment state.
@@ -52,7 +54,8 @@ record (including refresh credentials). SecureStore 58.0.2 uses Android Keystore
 AES/GCM encryption and iOS Keychain; the adapter selects
 `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY` on iOS. Chunked records avoid small Keychain
 item limits, and a final manifest switches the committed session atomically.
-A secure-storage preflight blocks bootstrap on failure. No separate token refresh
+A retryable secure-storage preflight blocks bootstrap on failure and explicitly
+selects SDK persistence again after recovery, avoiding silent memory-only sessions. No separate token refresh
 lifecycle is implemented. This source inspection and adapter tests do not replace
 native-device credential inspection and restart testing.
 
@@ -85,8 +88,8 @@ before and after upload and remove deletion-racing output.
 
 The durable Firestore deletion intent is swept by the service-authenticated
 Scheduler recovery route (and the independent local worker). Cleanup removes
-objects, waits 330 seconds to exceed the longest work lease, recursively removes
-assessment documents, sweeps objects again, and only then deletes the identity.
+objects, waits 330 seconds to exceed the longest work lease, removes assessment documents and descendants with acknowledged deletes, confirms
+that no document paths remain, sweeps objects again, and only then deletes the identity.
 Failures leave the tombstone in place and are retried on the next sweep. Completed
 account tombstones remain in the sweep to remove late outputs from paused jobs.
 `account_cleanup_failed` logs contain error categories, never credentials/receipts.
@@ -105,7 +108,9 @@ receipts persist for the tab session. Receipt expiry never stops cleanup.
 ## Deployment
 
 Terraform enables Identity Toolkit/Firebase APIs, email/password authentication,
-and the backend Firebase Auth admin role. Import any already-managed Identity
+and the backend Firebase Auth admin role. Client-side provider deletion is disabled
+so identities can only be removed by trusted cleanup after data deletion; public
+email/password signup remains enabled. Import any already-managed Identity
 Platform config before applying; do not create another identity project. Register
 one Firebase **web app** in the same existing GCP project for this JS SDK client
 on both native platforms and web. Copy its public `apiKey`, `appId`, `projectId`,
@@ -151,3 +156,16 @@ Sources: [Firebase token verification](https://firebase.google.com/docs/auth/adm
 [Expo SecureStore](https://docs.expo.dev/versions/latest/sdk/securestore/),
 [Identity Platform password policy](https://docs.cloud.google.com/identity-platform/docs/password-policy),
 [email enumeration protection](https://docs.cloud.google.com/identity-platform/docs/admin/email-enumeration-protection).
+
+## Implementation verification
+
+Automated verification includes real Admin SDK checks for missing/malformed,
+expired, wrong-project/issuer, anonymous, revoked, disabled and deleted identities;
+account/child-resource isolation; durable highlights; recent-auth deletion;
+object/database/identity failures; orphan descendants; receipt expiry/recovery;
+secure adapter restoration; initial-load/sign-out draining; browser registration,
+verification, reset, pending/completed deletion and bootstrap recovery. Browser
+traces are disabled for authenticated flows so captured requests cannot retain
+credentials or action codes. Login layout was inspected at a 390px phone width.
+Both independent code-review axes were run, and their actionable findings were
+addressed before final validation. Platform and cloud limitations above still apply.

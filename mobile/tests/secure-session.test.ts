@@ -66,3 +66,35 @@ test("disposed account state cannot publish queued or late changes to the next s
   assert.equal(publications, 1);
   assert.equal(writes, 1);
 });
+
+test("logout drains the initial cache save before clearing account storage", async () => {
+  let release!: () => void;
+  let saving!: () => void;
+  const started = new Promise<void>((resolve) => {
+    saving = resolve;
+  });
+  const store = new StateStore({
+    load: async () => null,
+    save: async () => {
+      saving();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    },
+  });
+  const loading = store.load();
+  await started;
+  store.dispose();
+  let drained = false;
+  const cleanup = store.drained().then(() => {
+    drained = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  try {
+    assert.equal(drained, false);
+  } finally {
+    release();
+    await assert.rejects(loading, /session has changed/);
+    await cleanup;
+  }
+});

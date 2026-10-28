@@ -18,15 +18,16 @@ const encrypted = secureStorage(
 const native = sdk as typeof sdk & {
   getReactNativePersistence: (storage: SecretStorage) => sdk.Persistence;
 };
+const persistence = native.getReactNativePersistence(encrypted);
 export const auth = sdk.initializeAuth(
   getApps()[0] ?? initializeApp(firebaseConfig),
-  { persistence: native.getReactNativePersistence(encrypted) },
+  { persistence },
 );
 if (emulatorUrl)
   sdk.connectAuthEmulator(auth, emulatorUrl, { disableWarnings: true });
 export const receiptStorage = encrypted;
 
-export const sessionPersistenceReady = (async () => {
+export async function checkSessionPersistence() {
   if (!(await SecureStore.isAvailableAsync()))
     throw new Error("Secure account storage is unavailable on this device.");
   const key = "firebase-persistence-preflight";
@@ -34,4 +35,5 @@ export const sessionPersistenceReady = (async () => {
   if ((await encrypted.getItem(key)) !== "ready")
     throw new Error("Secure account storage could not be verified.");
   await encrypted.removeItem(key);
-})();
+  await sdk.setPersistence(auth, persistence);
+}

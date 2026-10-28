@@ -3,7 +3,12 @@ import type { Photo } from "../domain/model";
 
 export function createPhotoStorage(scope: string) {
   const directory = () =>
-    new Directory(Paths.document, `photos-${encodeURIComponent(scope)}`);
+    new Directory(
+      Paths.document,
+      scope === "preview"
+        ? "preview-photos"
+        : `photos-${encodeURIComponent(scope)}`,
+    );
   async function retainPhoto(photo: Photo): Promise<Photo> {
     if (!photo.uri || photo.sample) return photo;
     const folder = directory();

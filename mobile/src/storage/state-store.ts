@@ -23,20 +23,24 @@ export class StateStore {
     private persistence: Persistence,
     private publish: (state: AppState) => void = () => {},
   ) {}
-  async load() {
-    this.check();
-    const saved = await this.persistence.load();
-    if (saved && (saved.version !== 1 || !Array.isArray(saved.assessments))) {
-      throw new Error(
-        "Saved preview data could not be read. It has not been reset.",
-      );
-    }
-    const state = recoverInterrupted(saved ?? emptyState());
-    this.check();
-    await this.persistence.save(state);
-    this.check();
-    this.state = state;
-    this.publish(state);
+  load() {
+    const work = this.queue.then(async () => {
+      this.check();
+      const saved = await this.persistence.load();
+      if (saved && (saved.version !== 1 || !Array.isArray(saved.assessments))) {
+        throw new Error(
+          "Saved preview data could not be read. It has not been reset.",
+        );
+      }
+      const state = recoverInterrupted(saved ?? emptyState());
+      this.check();
+      await this.persistence.save(state);
+      this.check();
+      this.state = state;
+      this.publish(state);
+    });
+    this.queue = work.catch(() => {});
+    return work;
   }
   update(change: (state: AppState) => AppState): Promise<AppState> {
     const work = this.queue.then(async () => {

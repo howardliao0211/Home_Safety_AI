@@ -55,13 +55,17 @@ export function secureStorage(
       serial(async () => {
         const key = keyFor(raw),
           old = await manifest(key);
-        const record = { id: nonce(), count: Math.ceil(value.length / 400) };
+        const characters = Array.from(value);
+        const record = {
+          id: nonce(),
+          count: Math.ceil(characters.length / 400),
+        };
         // Each chunk is at most 1600 UTF-8 bytes. Commit the manifest last.
         try {
           for (let i = 0; i < record.count; i++)
             await store.setItem(
               `${key}-${record.id}-${i}`,
-              value.slice(i * 400, (i + 1) * 400),
+              characters.slice(i * 400, (i + 1) * 400).join(""),
             );
           await store.setItem(key, JSON.stringify(record));
         } catch (error) {

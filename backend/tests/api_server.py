@@ -92,6 +92,18 @@ def ready():
 
 @app.post("/__test/control")
 def control(configuration: dict):
+    if configuration.get("finish_deletions"):
+        # Test-only clock advancement; production leases retain their full quiet period.
+        from google.cloud import firestore
+
+        accounts = app.state.accounts
+        for user in (
+            accounts.accounts.client.collection("users")
+            .where(filter=firestore.FieldFilter("state", "==", "deleting"))
+            .stream()
+        ):
+            user.reference.update({"accepted_at": 0})
+        accounts.recover()
     provider.fail_initial = int(configuration.get("fail_initial", 0))
     provider.fail_revision = int(configuration.get("fail_revision", 0))
     return {"configured": True}

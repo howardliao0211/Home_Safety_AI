@@ -50,7 +50,10 @@ function usePreviewState(session: Session) {
   const repository = store.current;
   const active = useRef(false);
   const client = useRef<Promise<BackendClient> | null>(null);
+  const sessionActive = useRef(true);
   const backend = () => {
+    if (!sessionActive.current)
+      return Promise.reject(new Error("The account session has changed."));
     if (!client.current) {
       client.current = Promise.resolve(
         new BackendClient(
@@ -173,6 +176,7 @@ function usePreviewState(session: Session) {
   }
   useEffect(() => {
     const remove = session.registerCleanup(async () => {
+      sessionActive.current = false;
       repository.dispose();
       (await client.current)?.dispose();
       await repository.drained();
@@ -182,6 +186,7 @@ function usePreviewState(session: Session) {
     void initialize();
     return () => {
       remove();
+      sessionActive.current = false;
       repository.dispose();
       void client.current?.then((c) => c.dispose());
     };
@@ -503,6 +508,11 @@ function usePreviewState(session: Session) {
         }
       }),
     annotationClient: backend,
+    refreshLatestAssessment: () =>
+      act(async () => {
+        await refreshLatest();
+        return true;
+      }),
     refreshAssessment: async (id: string) => {
       const current = assessmentById(id);
       await saveServer(await (await backend()).get(current));

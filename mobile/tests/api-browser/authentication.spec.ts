@@ -1,5 +1,84 @@
 import { expect, test } from "@playwright/test";
 
+test("unverified account deletion stays pending until server cleanup is confirmed", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Create account", exact: true })
+    .click();
+  await page
+    .getByRole("textbox", { name: "Email", exact: true })
+    .fill(`${crypto.randomUUID()}@example.test`);
+  await page
+    .getByLabel("Password", { exact: true })
+    .fill("Strong-password-123");
+  await page
+    .getByRole("button", { name: "Create account", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Verify your email" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Delete account", exact: true })
+    .click();
+  await page
+    .getByLabel("Password", { exact: true })
+    .fill("Strong-password-123");
+  await page
+    .getByRole("button", { name: "Permanently delete account", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Deleting your account" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Your account and associated data have been deleted.", {
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Deleting your account" }),
+  ).toBeVisible();
+  await request.post("http://127.0.0.1:8001/__test/control", {
+    data: { finish_deletions: true },
+  });
+  await page
+    .getByRole("button", { name: "Check deletion status", exact: true })
+    .click();
+  await expect(
+    page.getByText("Your account and associated data have been deleted.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Sign in", exact: true }),
+  ).toBeVisible();
+});
+
+test("account bootstrap storage failures offer a working retry", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const read = Storage.prototype.getItem;
+    let fail = true;
+    Storage.prototype.getItem = function (key: string) {
+      if (fail && key.startsWith("deletion:")) {
+        fail = false;
+        throw new Error("storage unavailable");
+      }
+      return read.call(this, key);
+    };
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Retry opening account" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Sign in", exact: true }),
+  ).toBeVisible();
+  await page.screenshot({ path: "../.tools/auth-login.png", fullPage: true });
+});
+
 test("registration, verification refresh, sign-out isolation and password recovery", async ({
   page,
   request,

@@ -2,7 +2,13 @@ import { AuthProvider, useAuth } from "@/auth/context";
 import { AuthScreen } from "@/auth/screen";
 import { apiEnabled } from "@/api/config";
 import { useEffect, useState } from "react";
-import { AccessibilityInfo, ActivityIndicator, View } from "react-native";
+import {
+  AccessibilityInfo,
+  ActivityIndicator,
+  Pressable,
+  Text,
+  View,
+} from "react-native";
 import { Stack, router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { ThemeProvider, DefaultTheme } from "expo-router/react-navigation";
@@ -11,6 +17,7 @@ import { Button, Copy } from "@/components/ui";
 import { colors } from "@/components/theme";
 
 function Navigation() {
+  const auth = useAuth();
   const { ready, busy, error, initialize } = usePreview();
   const [reduceMotion, setReduceMotion] = useState(true);
   useEffect(() => {
@@ -21,6 +28,13 @@ function Navigation() {
     );
     return () => subscription.remove();
   }, []);
+  useEffect(() => {
+    if (ready && apiEnabled && auth.resetNavigation.current) {
+      auth.resetNavigation.current = false;
+      router.dismissAll();
+      router.replace("/");
+    }
+  }, [ready]);
   if (!ready)
     return (
       <View
@@ -79,11 +93,16 @@ function Navigation() {
               disabled={busy}
             />
           ) : apiEnabled ? (
-            <Button
-              label="Account"
-              variant="text"
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Account"
               onPress={() => router.push("/account")}
-            />
+              style={{ minHeight: 48, minWidth: 48, justifyContent: "center" }}
+            >
+              <Text style={{ color: colors.accent, fontSize: 17 }}>
+                Account
+              </Text>
+            </Pressable>
           ) : null,
       }}
     >
@@ -130,7 +149,7 @@ function AssessmentLayout() {
       key={apiEnabled ? auth.scope : "preview"}
       session={{
         ...auth,
-        scope: apiEnabled ? auth.scope : "home-safety-preview-v1",
+        scope: apiEnabled ? auth.scope : "preview",
       }}
     >
       <ThemeProvider
@@ -183,8 +202,19 @@ function AuthGate() {
           backgroundColor: colors.background,
         }}
       >
-        <ActivityIndicator color={colors.accent} />
+        {!auth.bootstrapError && <ActivityIndicator color={colors.accent} />}
         <Copy>{auth.message || "Opening your account…"}</Copy>
+        {auth.bootstrapError && (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void auth.initialize()}
+            style={{ minHeight: 48, justifyContent: "center" }}
+          >
+            <Text style={{ color: colors.accent, fontSize: 17 }}>
+              Retry opening account
+            </Text>
+          </Pressable>
+        )}
       </View>
     );
   if (

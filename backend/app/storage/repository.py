@@ -129,7 +129,11 @@ class FirestoreRepository:
                 ]
                 for annotation_id in publishing:
                     payload["annotation_commits"][annotation_id] = firestore.SERVER_TIMESTAMP
-                transaction.update(ref, payload)
+                transaction.update(
+                    ref,
+                    payload,
+                    option=self.client.write_option(last_update_time=snapshot.update_time),
+                )
                 result = self.client._firestore_api.commit(
                     request={
                         "database": self.client._database_string,

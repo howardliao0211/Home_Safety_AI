@@ -263,6 +263,62 @@ test("network failures retain the session and retry without preview fallback", a
   expect(await deviceId(page)).toBe(identity);
 });
 
+test("sign-out during analysis discards the late response before another account opens", async ({
+  page,
+  request,
+}) => {
+  const ownerToken = await bearer(page);
+  let delivered = false;
+  let release!: () => void;
+  let assessmentId = "";
+  const delayed = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(backend + "/v1/assessments/*/analyze", async (route) => {
+    const response = await route.fetch();
+    assessmentId = (await response.json()).id;
+    delivered = true;
+    await delayed;
+    await route.fulfill({ response }).catch(() => {});
+  });
+  await start(page);
+  await page.getByRole("button", { name: "Use living room sample" }).click();
+  await submit(page);
+  await expect.poll(() => delivered).toBe(true);
+  await page.getByRole("button", { name: "Account", exact: true }).click();
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Sign in", exact: true }),
+  ).toBeVisible();
+  release();
+  const endpoint = "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/";
+  const email = `${crypto.randomUUID()}@example.test`;
+  const registered = await (
+    await request.post(endpoint + "accounts:signUp?key=local", {
+      data: { email, password: "Strong-password-123", returnSecureToken: true },
+    })
+  ).json();
+  await request.post(endpoint + "projects/home-safety-local/accounts:update", {
+    headers: { Authorization: "Bearer owner" },
+    data: { localId: registered.localId, emailVerified: true },
+  });
+  await page.getByRole("textbox", { name: "Email", exact: true }).fill(email);
+  await page
+    .getByLabel("Password", { exact: true })
+    .fill("Strong-password-123");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Start with a room", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("0 of 2 handled", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole("img", { name: /room photo/ })).toHaveCount(0);
+  await request.delete(backend + "/v1/assessments/" + assessmentId, {
+    headers: { Authorization: ownerToken },
+  });
+});
+
 test("real file upload, failed status write, server restart state and latest restoration after deletion", async ({
   page,
   request,

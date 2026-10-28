@@ -21,7 +21,8 @@ function open() {
   });
   return database;
 }
-export function createPersistence(stateKey: string) {
+export function createPersistence(scope: string) {
+  const stateKey = scope === "preview" ? "state" : scope;
   return {
     async removeLegacy(): Promise<void> {
       const db = await open();

@@ -18,7 +18,7 @@ import {
   validatePassword,
   type User,
 } from "firebase/auth";
-import { auth, receiptStorage, sessionPersistenceReady } from "./firebase";
+import { auth, receiptStorage, checkSessionPersistence } from "./firebase";
 import { firebaseConfig, emulatorUrl } from "./config";
 import { accountScope, apiConfig } from "@/api/config";
 import { ApiError } from "@/api/backend-client";
@@ -40,12 +40,14 @@ export function authMessage(error: unknown) {
 
 function useAccountState() {
   const [user, setUser] = useState<User | null>(null);
+  const [bootstrapError, setBootstrapError] = useState(false);
   const [ready, setReady] = useState(false);
   const [message, setMessage] = useState("");
   const [receipt, setReceipt] = useState<string | null>(null);
   const [deletionComplete, setDeletionComplete] = useState(false);
   const [accountRestricted, setAccountRestricted] = useState(false);
   const [blocked, setBlocked] = useState(false);
+  const resetNavigation = useRef(false);
   const lastUid = useRef<string | null>(null);
   const cleanups = useRef(new Set<() => Promise<void>>());
   const receiptKey = `deletion:${firebaseConfig.projectId}:${apiConfig.baseUrl}`;
@@ -57,6 +59,7 @@ function useAccountState() {
     const unsubscribe = onIdTokenChanged(auth, async (next) => {
       if (!active) return;
       if (lastUid.current && lastUid.current !== next?.uid) {
+        resetNavigation.current = true;
         setBlocked(true);
         try {
           await clearLocal();
@@ -69,33 +72,36 @@ function useAccountState() {
       lastUid.current = next?.uid ?? null;
       setUser(next);
     });
-    void Promise.all([
-      auth.authStateReady(),
-      receiptStorage.getItem(receiptKey),
-      sessionPersistenceReady,
-    ])
-      .then(([, saved]) => {
-        if (active) {
-          setUser(auth.currentUser);
-          setReceipt(saved);
-          setReady(true);
-        }
-      })
-      .catch((error) => {
-        if (active) setMessage(authMessage(error));
-      });
+    void initialize();
     return () => {
       active = false;
       unsubscribe();
     };
   }, []);
+  async function initialize() {
+    setBootstrapError(false);
+    setMessage("");
+    try {
+      await auth.authStateReady();
+      await checkSessionPersistence();
+      const saved = await receiptStorage.getItem(receiptKey);
+      setUser(auth.currentUser);
+      setReceipt(saved);
+      setReady(true);
+    } catch (error) {
+      setMessage(authMessage(error));
+      setBootstrapError(true);
+    }
+  }
   async function logout() {
+    resetNavigation.current = true;
     setBlocked(true);
     try {
       await clearLocal();
       await signOut(auth);
       setUser(null);
       setAccountRestricted(false);
+      setDeletionComplete(false);
       setReceipt(null);
     } finally {
       setBlocked(false);
@@ -153,6 +159,9 @@ function useAccountState() {
   return {
     user,
     ready,
+    bootstrapError,
+    resetNavigation,
+    initialize,
     message,
     blocked,
     accountRestricted,
@@ -171,10 +180,14 @@ function useAccountState() {
     },
     logout,
     login: async (email: string, password: string) => {
+      resetNavigation.current = true;
+      setDeletionComplete(false);
       setMessage("");
       await signInWithEmailAndPassword(auth, email.trim(), password);
     },
     register: async (email: string, password: string) => {
+      resetNavigation.current = true;
+      setDeletionComplete(false);
       // Firebase's Auth emulator does not implement getPasswordPolicy. Keep the
       // documented local policy explicit; production always queries the provider.
       if (

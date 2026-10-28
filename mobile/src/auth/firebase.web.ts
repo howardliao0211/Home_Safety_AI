@@ -3,6 +3,7 @@ import {
   initializeAuth,
   browserSessionPersistence,
   connectAuthEmulator,
+  setPersistence,
 } from "firebase/auth";
 import { firebaseConfig, emulatorUrl } from "./config";
 export const auth = initializeAuth(
@@ -22,4 +23,11 @@ export const receiptStorage = {
   },
 };
 
-export const sessionPersistenceReady = Promise.resolve();
+export async function checkSessionPersistence() {
+  const key = "firebase-persistence-preflight";
+  sessionStorage.setItem(key, "ready");
+  if (sessionStorage.getItem(key) !== "ready")
+    throw new Error("Account storage is unavailable.");
+  sessionStorage.removeItem(key);
+  await setPersistence(auth, browserSessionPersistence);
+}

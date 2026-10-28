@@ -1,7 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { AppState } from "../domain/model";
 export function createPersistence(scope: string) {
-  const key = `home-safety-${scope}`;
+  const key =
+    scope === "preview" ? "home-safety-preview-v1" : `home-safety-${scope}`;
   return {
     async removeLegacy() {
       const keys = await AsyncStorage.getAllKeys();

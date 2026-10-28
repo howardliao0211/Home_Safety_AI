@@ -13,11 +13,68 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "@/components/theme";
 import { authMessage, useAuth } from "./context";
 
-export function AuthScreen({ account = false }: { account?: boolean }) {
+function AuthAction({
+  busy = false,
+  label,
+  onPress,
+  danger = false,
+  primary = false,
+  disabled = false,
+}: {
+  busy?: boolean;
+  label: string;
+  onPress: () => void;
+  danger?: boolean;
+  primary?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: busy || disabled, busy }}
+      disabled={busy || disabled}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        minHeight: 48,
+        borderRadius: 12,
+        justifyContent: "center",
+        padding: 14,
+        backgroundColor: danger
+          ? colors.danger
+          : primary
+            ? colors.accent
+            : "transparent",
+        opacity: busy || disabled ? 0.5 : pressed ? 0.8 : 1,
+      })}
+    >
+      <Text
+        style={{
+          color: danger || primary ? "white" : colors.accent,
+          fontSize: 17,
+          fontWeight: "600",
+          textAlign: "center",
+        }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+export function AuthScreen({
+  account = false,
+  onRefresh,
+  refreshDisabled = false,
+}: {
+  account?: boolean;
+  onRefresh?: () => Promise<void>;
+  refreshDisabled?: boolean;
+}) {
   const auth = useAuth();
   const [mode, setMode] = useState<"login" | "signup" | "reset">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [focused, setFocused] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const working = useRef(false);
@@ -26,6 +83,9 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
   const passwordRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const insets = useSafeAreaInsets();
   const verified = auth.user?.emailVerified;
+  useEffect(() => {
+    if (auth.deletionComplete) setMode("login");
+  }, [auth.deletionComplete]);
   async function act(work: () => Promise<unknown>, success = "") {
     if (working.current) return;
     working.current = true;
@@ -43,8 +103,9 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
     }
   }
   useEffect(() => {
-    if (message) AccessibilityInfo.announceForAccessibility(message);
-  }, [message]);
+    const notice = message || auth.message;
+    if (notice) AccessibilityInfo.announceForAccessibility(notice);
+  }, [message, auth.message]);
   useEffect(() => {
     if (!auth.receipt) return;
     const timer = setInterval(() => {
@@ -52,47 +113,6 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
     }, 5000);
     return () => clearInterval(timer);
   }, [auth.receipt]);
-  const Action = ({
-    label,
-    onPress,
-    danger = false,
-    primary = false,
-  }: {
-    label: string;
-    onPress: () => void;
-    danger?: boolean;
-    primary?: boolean;
-  }) => (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled: busy, busy }}
-      disabled={busy}
-      onPress={onPress}
-      style={({ pressed }) => ({
-        minHeight: 48,
-        borderRadius: 12,
-        justifyContent: "center",
-        padding: 14,
-        backgroundColor: danger
-          ? colors.danger
-          : primary
-            ? colors.accent
-            : "transparent",
-        opacity: busy ? 0.5 : pressed ? 0.8 : 1,
-      })}
-    >
-      <Text
-        style={{
-          color: danger || primary ? "white" : colors.accent,
-          fontSize: 17,
-          fontWeight: "600",
-          textAlign: "center",
-        }}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
   const text = { fontSize: 17, lineHeight: 25, color: colors.ink };
   const heading = auth.receipt
     ? "Deleting your account"
@@ -171,7 +191,8 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
               continues if you close the app. This can take several minutes;
               deletion is complete only when confirmed here.
             </Text>
-            <Action
+            <AuthAction
+              busy={busy}
               primary
               label="Check deletion status"
               onPress={() =>
@@ -181,7 +202,8 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
                 )
               }
             />
-            <Action
+            <AuthAction
+              busy={busy}
               label="Sign out while cleanup continues"
               onPress={() => void act(auth.logout)}
             />
@@ -198,12 +220,14 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
                   this app and refresh. If the link expired or is invalid,
                   request a new one.
                 </Text>
-                <Action
+                <AuthAction
+                  busy={busy}
                   primary
                   label="I’ve verified my email"
                   onPress={() => void act(auth.refresh)}
                 />
-                <Action
+                <AuthAction
+                  busy={busy}
                   label="Resend verification email"
                   onPress={() =>
                     void act(
@@ -214,9 +238,23 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
                 />
               </>
             )}
-            <Action label="Sign out" onPress={() => void act(auth.logout)} />
+            {account && verified && onRefresh && (
+              <AuthAction
+                busy={busy}
+                primary
+                label="Refresh latest assessment"
+                disabled={refreshDisabled}
+                onPress={() => void act(onRefresh)}
+              />
+            )}
+            <AuthAction
+              busy={busy}
+              label="Sign out"
+              onPress={() => void act(auth.logout)}
+            />
             {!confirmDelete ? (
-              <Action
+              <AuthAction
+                busy={busy}
                 label="Delete account"
                 danger
                 onPress={() => {
@@ -234,6 +272,8 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
                 <Text style={text}>Password</Text>
                 <TextInput
                   accessibilityLabel="Password"
+                  onFocus={() => setFocused("password")}
+                  onBlur={() => setFocused(null)}
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!visible}
@@ -243,17 +283,20 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
                   style={{
                     ...text,
                     borderWidth: 1,
-                    borderColor: colors.ink,
+                    borderColor:
+                      focused === "password" ? colors.accent : colors.ink,
                     borderRadius: 10,
                     padding: 14,
                     minHeight: 48,
                   }}
                 />
-                <Action
+                <AuthAction
+                  busy={busy}
                   label={visible ? "Hide password" : "Show password"}
                   onPress={() => setVisible(!visible)}
                 />
-                <Action
+                <AuthAction
+                  busy={busy}
                   label="Permanently delete account"
                   danger
                   onPress={() => {
@@ -262,7 +305,8 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
                     else void act(() => auth.deleteAccount(password));
                   }}
                 />
-                <Action
+                <AuthAction
+                  busy={busy}
                   label="Cancel deletion"
                   onPress={() => {
                     setConfirmDelete(false);
@@ -283,6 +327,8 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
               <Text style={text}>Email</Text>
               <TextInput
                 accessibilityLabel="Email"
+                onFocus={() => setFocused("email")}
+                onBlur={() => setFocused(null)}
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -298,7 +344,7 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
                 style={{
                   ...text,
                   borderWidth: 1,
-                  borderColor: colors.ink,
+                  borderColor: focused === "email" ? colors.accent : colors.ink,
                   borderRadius: 10,
                   padding: 14,
                   minHeight: 48,
@@ -311,6 +357,8 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
                 <TextInput
                   ref={passwordRef}
                   accessibilityLabel="Password"
+                  onFocus={() => setFocused("password")}
+                  onBlur={() => setFocused(null)}
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!visible}
@@ -327,13 +375,15 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
                   style={{
                     ...text,
                     borderWidth: 1,
-                    borderColor: colors.ink,
+                    borderColor:
+                      focused === "password" ? colors.accent : colors.ink,
                     borderRadius: 10,
                     padding: 14,
                     minHeight: 48,
                   }}
                 />
-                <Action
+                <AuthAction
+                  busy={busy}
                   label={visible ? "Hide password" : "Show password"}
                   onPress={() => setVisible(!visible)}
                 />
@@ -345,7 +395,8 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
                 )}
               </View>
             )}
-            <Action
+            <AuthAction
+              busy={busy}
               primary
               label={
                 mode === "signup"
@@ -358,7 +409,8 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
             />
             {mode === "login" ? (
               <>
-                <Action
+                <AuthAction
+                  busy={busy}
                   label="Forgot password?"
                   onPress={() => {
                     setMode("reset");
@@ -366,7 +418,8 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
                     setMessage("");
                   }}
                 />
-                <Action
+                <AuthAction
+                  busy={busy}
                   label="Create account"
                   onPress={() => {
                     setMode("signup");
@@ -376,7 +429,8 @@ export function AuthScreen({ account = false }: { account?: boolean }) {
                 />
               </>
             ) : (
-              <Action
+              <AuthAction
+                busy={busy}
                 label="Back to sign in"
                 onPress={() => {
                   setMode("login");

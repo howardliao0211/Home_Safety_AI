@@ -184,8 +184,15 @@ resource "google_firestore_field" "annotation_dispatch" {
 
 resource "google_identity_platform_config" "accounts" {
   project = var.project_id
+  client {
+    permissions {
+      disabled_user_deletion = true
+      disabled_user_signup   = false
+    }
+  }
   sign_in {
     allow_duplicate_emails = false
+    anonymous { enabled = false }
     email {
       enabled           = true
       password_required = true

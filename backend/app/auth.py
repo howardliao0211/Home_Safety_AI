@@ -1,6 +1,8 @@
 """Managed end-user identity. Internal routes continue using service OIDC."""
 
 import base64
+import math
+import time
 
 import firebase_admin
 from firebase_admin import auth, credentials
@@ -24,6 +26,11 @@ class FirebaseIdentity:
     def verify(self, token):
         try:
             claims = auth.verify_id_token(token, app=self.app, check_revoked=True)
+            # Admin skips temporal validation in emulator mode. Keep the same
+            # expiry boundary in local integration and cloud deployments.
+            expiry = float(claims.get("exp", 0))
+            if not math.isfinite(expiry) or expiry <= time.time():
+                raise ValueError("Expired identity")
             if claims.get("firebase", {}).get("sign_in_provider") != "password":
                 raise ValueError("Account sign-in required")
             return claims
@@ -33,6 +40,7 @@ class FirebaseIdentity:
             auth.UserDisabledError,
             auth.UserNotFoundError,
             ValueError,
+            TypeError,
         ):
             raise AppError(401, "unauthorized", "Sign in again to continue.") from None
 

@@ -122,11 +122,23 @@ class AccountDeletion:
                 self.photos.delete_account(uid)
                 if time.time() < record["accepted_at"] + QUIET_SECONDS:
                     continue
-                for assessment in snapshot.reference.collection("assessments").stream(timeout=20):
-                    self.accounts.client.recursive_delete(assessment.reference)
+                assessments = snapshot.reference.collection("assessments")
+                # list_documents includes missing parents with surviving descendants.
+                # Synchronous acknowledged deletes avoid BulkWriter's exhausted-retry
+                # callback silently dropping writes while recursive_delete returns.
+                for assessment in assessments.list_documents(timeout=10):
+                    self._delete_tree(assessment)
+                if any(assessments.list_documents(timeout=10)):
+                    raise RuntimeError("Account documents remain after cleanup")
                 self.photos.delete_account(uid)
                 if record["state"] != "deleted":
                     self.identity.delete(uid)
                     snapshot.reference.update({"state": "deleted"}, timeout=10)
             except Exception as exc:
                 logger.error("account_cleanup_failed category=%s", type(exc).__name__)
+
+    def _delete_tree(self, document):
+        for collection in document.collections(timeout=10):
+            for child in collection.list_documents(timeout=10):
+                self._delete_tree(child)
+        document.delete(timeout=10, retry=None)
