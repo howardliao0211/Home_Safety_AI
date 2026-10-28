@@ -313,9 +313,9 @@ def test_auth_validation_and_unreadable_photo(rig, settings):
     from pydantic import SecretStr
 
     settings.demo_bearer_token = SecretStr("private-demo-token")
-    assert client.get("/healthz").status_code == 401
+    assert client.get("/health").status_code == 401
     client.headers["Authorization"] = "Bearer private-demo-token"
-    assert client.get("/healthz").status_code == 200
+    assert client.get("/health").status_code == 200
 
 
 def test_status_changes_preserve_notes_unless_explicitly_cleared(rig, assessed):

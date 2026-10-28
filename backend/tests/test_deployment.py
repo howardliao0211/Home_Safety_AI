@@ -47,10 +47,10 @@ def test_production_disables_docs_and_enforces_api_auth(production):
     with TestClient(
         create_app(production, MemoryRepository(), MemoryPhotos(), StubProvider())
     ) as client:
-        assert client.get("/healthz").status_code == 401
-        assert client.get("/healthz", headers={"Authorization": "Bearer wrong"}).status_code == 401
+        assert client.get("/health").status_code == 401
+        assert client.get("/health", headers={"Authorization": "Bearer wrong"}).status_code == 401
         client.headers["Authorization"] = "Bearer fake-demo-token"
-        assert client.get("/healthz").json() == {"status": "ok"}
+        assert client.get("/health").json() == {"status": "ok"}
         for path in ("/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"):
             assert client.get(path).status_code == 404
 
@@ -262,3 +262,46 @@ def test_capacity_admits_twelve_concurrent_highlight_attempts(config):
     queue = terraform[terraform.index('resource "google_cloud_tasks_queue"') :]
     assert int(re.search(r"max_concurrent_dispatches\s*=\s*(\d+)", queue).group(1)) >= 12
     assert int(re.search(r"max_dispatches_per_second\s*=\s*(\d+)", queue).group(1)) >= 12
+
+
+def test_phone_env_refreshes_service_url_and_pinned_token(
+    config, tmp_path, monkeypatch, capsys
+):
+    from dotenv import dotenv_values
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("MUSE_API_KEY=private-model-key\nUNRELATED=keep-me\n")
+    runner = deploy.Deployer(config)
+    checks = []
+    monkeypatch.setattr(runner, "verify_url", lambda url, token: checks.append((url, token)))
+    for url, token in (
+        ("https://first-service.run.app", "first-pinned-token"),
+        ("https://recreated-service.run.app", "second-pinned-token"),
+    ):
+        monkeypatch.setattr(runner, "describe", lambda url=url: {
+            "status": {"url": url, "traffic": [{"revisionName": "serving", "percent": 100}]},
+        })
+        monkeypatch.setattr(runner, "revision_token", lambda revision, token=token: token)
+        runner.configure_phone(env_file)
+        values = dotenv_values(env_file)
+        assert values["EXPO_PUBLIC_API_URL"] == url
+        assert values["EXPO_PUBLIC_DATA_SOURCE"] == "api"
+        assert values["EXPO_PUBLIC_DEMO_TOKEN"] == values["DEMO_BEARER_TOKEN"] == token
+        assert values["MUSE_API_KEY"] == "private-model-key"
+        assert values["UNRELATED"] == "keep-me"
+        assert checks[-1] == (url, token)
+    assert env_file.stat().st_mode & 0o777 == 0o600
+    output = capsys.readouterr().out
+    assert "pinned-token" not in output
+    assert "private-model-key" not in output
+
+
+def test_phone_env_failure_preserves_previous_frontend_settings(config, tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    original = "EXPO_PUBLIC_API_URL=https://previous.run.app\n"
+    env_file.write_text(original)
+    runner = FakeRelease(config, fail_at="https://service.run.app")
+    monkeypatch.setattr(runner, "revision_token", lambda revision: "pinned-token")
+    with pytest.raises(deploy.DeploymentError, match="Injected health failure"):
+        runner.configure_phone(env_file)
+    assert env_file.read_text() == original

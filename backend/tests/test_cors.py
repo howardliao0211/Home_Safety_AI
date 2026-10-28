@@ -19,7 +19,7 @@ def test_local_browser_preflight_and_error_responses_have_scoped_cors(settings):
         response = client.options("/v1/assessments", headers=headers)
         assert response.status_code == 200
         assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:8081"
-        response = client.get("/healthz", headers={"Origin": "http://localhost:8081"})
+        response = client.get("/health", headers={"Origin": "http://localhost:8081"})
         assert response.status_code == 401
         assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:8081"
         response = client.options(

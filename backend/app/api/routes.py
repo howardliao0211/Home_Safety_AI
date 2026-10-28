@@ -71,7 +71,7 @@ def read_photo(photo: UploadFile):
         photo.file.close()
 
 
-@router.get("/healthz")
+@router.get("/health")
 def health():
     # Liveness only; startup constructs the configured provider and storage clients.
     return {"status": "ok"}

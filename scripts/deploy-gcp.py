@@ -48,10 +48,6 @@ class Config:
     muse_secret: str = ""
     annotation_tasks_queue: str = ""
     annotation_worker_url: str = ""
-    api_url: str = ""
-    load_balancer_ip: str = ""
-    dns_zone: str = ""
-    certificate_name: str = ""
 
 
 class Deployer:
@@ -351,8 +347,6 @@ class Deployer:
         current = self.describe()
         try:
             self.verify_url(current["status"]["url"], demo_token)
-            if self.config.api_url:
-                self.verify_hostname(demo_token)
         except (DeploymentError, httpx.HTTPError):
             if previous:
                 self.promote(self.active_revision(previous))
@@ -424,55 +418,6 @@ class Deployer:
         service = self.describe()
         token = self.revision_token(self.active_revision(service))
         self.verify_url(service["status"]["url"], token)
-        if self.config.api_url:
-            self.verify_hostname(token)
-
-    def verify_hostname(self, token):
-        import socket
-        from urllib.parse import urlsplit
-
-        hostname = urlsplit(self.config.api_url).hostname
-        try:
-            resolved = {item[4][0] for item in socket.getaddrinfo(hostname, 443)}
-        except OSError as error:
-            raise DeploymentError(
-                "API hostname DNS lookup failed; check domain delegation and propagation."
-            ) from error
-        if resolved != {self.config.load_balancer_ip}:
-            raise DeploymentError(
-                "API hostname does not resolve to the reserved load-balancer IP."
-            )
-        records = json.loads(
-            self.gcloud(
-                "dns",
-                "record-sets",
-                "list",
-                f"--zone={self.config.dns_zone}",
-                f"--name={hostname}.",
-                "--type=A",
-                "--format=json",
-            )
-        )
-        if len(records) != 1 or records[0].get("rrdatas") != [
-            self.config.load_balancer_ip
-        ]:
-            raise DeploymentError(
-                "Cloud DNS API record does not match the reserved IP."
-            )
-        certificate = json.loads(
-            self.gcloud(
-                "compute",
-                "ssl-certificates",
-                "describe",
-                self.config.certificate_name,
-                "--global",
-                "--format=json",
-            )
-        )
-        if certificate.get("managed", {}).get("status") != "ACTIVE":
-            raise DeploymentError("Managed API TLS certificate is not ACTIVE yet.")
-        # httpx also verifies the actual TLS chain and hostname on every request.
-        self.verify_url(self.config.api_url, token)
 
     def delete_service(self):
         if self.describe(missing_ok=True):
@@ -482,19 +427,16 @@ class Deployer:
         print("Cloud Run service removed; Terraform dependencies can now be destroyed.")
 
     def configure_phone(self, env_file):
-        if not self.config.api_url:
-            raise DeploymentError(
-                "Configure the custom API domain and apply Terraform first."
-            )
         service = self.describe()
         token = self.revision_token(self.active_revision(service))
-        self.verify_hostname(token)
+        url = service["status"]["url"]
+        self.verify_url(url, token)
         env_file.touch(mode=0o600, exist_ok=True)
         env_file.chmod(0o600)
         for name, value in {
             "DEMO_BEARER_TOKEN": token,
             "EXPO_PUBLIC_DATA_SOURCE": "api",
-            "EXPO_PUBLIC_API_URL": self.config.api_url,
+            "EXPO_PUBLIC_API_URL": url,
             "EXPO_PUBLIC_DEMO_TOKEN": token,
         }.items():
             set_key(str(env_file), name, value)
@@ -520,8 +462,6 @@ class Deployer:
         self.verify_url(url, token)
         self.promote(revision)
         self.verify_url(self.describe()["status"]["url"], token)
-        if self.config.api_url:
-            self.verify_hostname(token)
         print(
             f"Traffic restored to {revision}; it uses its original pinned secret versions."
         )
@@ -549,14 +489,14 @@ class Deployer:
                     )
                 return response
 
-            expect(client.get("/healthz"), 401)
+            expect(client.get("/health"), 401)
             expect(
-                client.get("/healthz", headers={"Authorization": "Bearer invalid"}), 401
+                client.get("/health", headers={"Authorization": "Bearer invalid"}), 401
             )
             client.headers.update(
                 {"Authorization": f"Bearer {token}", "X-Device-ID": device}
             )
-            expect(client.get("/healthz"), 200)
+            expect(client.get("/health"), 200)
             for route in ("/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"):
                 expect(client.get(route), 404)
             try:
@@ -640,12 +580,13 @@ def main():
     sub.add_parser(
         "status", help="Show URL and serving revision, without configuration secrets"
     )
+    sub.add_parser("service-url", help="Print the current Cloud Run service HTTPS URL")
     sub.add_parser(
         "delete-service",
         help="Remove Cloud Run before explicit infrastructure teardown",
     )
     phone = sub.add_parser(
-        "phone-env", help="Verify custom HTTPS API and save client settings privately"
+        "phone-env", help="Verify the API endpoint and save client settings privately"
     )
     phone.add_argument("--env-file", type=Path, default=ROOT / ".env")
     rollback = sub.add_parser(
@@ -690,6 +631,8 @@ def main():
             deployer.delete_service()
         elif args.command == "phone-env":
             deployer.configure_phone(args.env_file)
+        elif args.command == "service-url":
+            print(deployer.describe()["status"]["url"])
         else:
             service = deployer.describe()
             print(

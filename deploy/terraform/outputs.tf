@@ -13,16 +13,7 @@ output "deployment_config" {
     annotation_worker_url  = trimsuffix(var.annotation_worker_url, "/")
     groq_secret            = google_secret_manager_secret.backend["groq-api-key"].secret_id
     demo_secret            = "home-safety-demo-bearer-token"
-    api_url                = var.domain_name == "" ? "" : "https://api.${var.domain_name}"
-    load_balancer_ip       = try(google_compute_global_address.api[0].address, "")
-    dns_zone               = try(google_dns_managed_zone.api[0].name, "")
-    certificate_name       = try(google_compute_managed_ssl_certificate.api[0].name, "")
   }
-}
-
-output "domain_name_servers" {
-  description = "Use these name servers when registering/delegating the domain outside this state."
-  value       = try(google_dns_managed_zone.api[0].name_servers, [])
 }
 
 output "project_id" {

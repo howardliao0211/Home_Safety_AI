@@ -123,7 +123,7 @@ Choose **Start with a room**, select a photo or bundled sample, choose optional
 household profiles, and create an assessment. This calls the selected model
 provider and consumes model quota. Local API docs are at
 <http://127.0.0.1:8000/docs>; liveness is at
-<http://127.0.0.1:8000/healthz>. If configured, the demo bearer token is required
+<http://127.0.0.1:8000/health>. If configured, the demo bearer token is required
 for API requests, including health checks.
 
 To stop the managed frontend, worker, API, and storage emulators:

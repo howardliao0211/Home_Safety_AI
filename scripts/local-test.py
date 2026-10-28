@@ -183,7 +183,7 @@ def start():
             ROOT / "backend",
         )
         started.append("backend")
-        wait_ready("backend", backend, "/healthz")
+        wait_ready("backend", backend, "/health")
         print("Starting highlight worker…", flush=True)
         # A worker left behind by a crashed stack would otherwise run twice.
         stop_process("worker")

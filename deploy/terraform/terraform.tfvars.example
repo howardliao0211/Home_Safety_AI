@@ -1,7 +1,5 @@
 project_id = "home-safety-ai"
 region     = "us-central1"
-# After checking availability/price and registering outside Terraform:
-# domain_name = "your-registered-domain.com"
 # After the first secrets command and initial release:
 # demo_token_initialized = true
-# annotation_worker_url = "https://api.your-registered-domain.com"
+# annotation_worker_url = "https://YOUR_SERVICE.run.app"

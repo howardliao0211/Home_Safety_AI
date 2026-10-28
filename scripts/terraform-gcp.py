@@ -167,9 +167,12 @@ def main() -> int:
             raise RuntimeError(
                 "Apply requires one reviewed saved plan: plan -out=phone.tfplan, then apply phone.tfplan."
             )
-        if command == "destroy" and extra:
+        if command == "destroy" and any(
+            not arg.startswith("-var-file=") or not arg.removeprefix("-var-file=")
+            for arg in extra
+        ):
             raise RuntimeError(
-                "Destroy takes no Terraform arguments; it creates and displays a destroy plan for confirmation."
+                "Destroy accepts only -var-file=PATH; it creates and displays a destroy plan for confirmation."
             )
         if any(
             arg in {"-destroy", "-auto-approve", "-invoke"}
@@ -219,11 +222,11 @@ def main() -> int:
             ).returncode
         if command == "destroy":
             print(
-                "Destroy removes persistent assessment data and photo objects. Domain registration and the demo-token secret remain.",
+                "Destroy removes persistent assessment data and photo objects. The external demo-token secret remains.",
                 flush=True,
             )
             subprocess.run(
-                [*terraform, "plan", "-destroy", "-out=destroy.tfplan"],
+                [*terraform, "plan", "-destroy", *extra, "-out=destroy.tfplan"],
                 env=env,
                 check=True,
             )

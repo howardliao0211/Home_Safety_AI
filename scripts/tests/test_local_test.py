@@ -28,7 +28,7 @@ if os.environ.get("FAIL_WORKER"):
 port = int(sys.argv[sys.argv.index("--port") + 1] if "--port" in sys.argv else sys.argv[-1])
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(401 if self.path == "/healthz" else 200)
+        self.send_response(401 if self.path == "/health" else 200)
         self.end_headers()
         self.wfile.write(b"ready")
 http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()

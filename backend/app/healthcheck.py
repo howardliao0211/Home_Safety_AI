@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 def main():
     token = os.environ.get("DEMO_BEARER_TOKEN", "")
     request = Request(
-        f"http://127.0.0.1:{int(os.environ.get('PORT', '8080'))}/healthz",
+        f"http://127.0.0.1:{int(os.environ.get('PORT', '8080'))}/health",
         headers={"Authorization": f"Bearer {token}"} if token else {},
     )
     try:

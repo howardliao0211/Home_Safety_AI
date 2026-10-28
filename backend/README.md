@@ -20,7 +20,7 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 Open `http://127.0.0.1:8000/docs` for the interactive API and
-`http://127.0.0.1:8000/healthz` for liveness. The first startup needs both emulator
+`http://127.0.0.1:8000/health` for liveness. The first startup needs both emulator
 containers running. Inspect startup with `docker compose -f backend/compose.yaml
 logs --tail=30` from the repo root. A daemon/socket permission error means Docker
 needs to be made accessible in your development environment.
@@ -102,7 +102,7 @@ URL, token, and physical-device networking configuration.
 
 | Method and path | Input / behavior |
 | --- | --- |
-| `GET /healthz` | Liveness only; no model call or storage readiness guarantee |
+| `GET /health` | Liveness only; no model call or storage readiness guarantee |
 | `POST /v1/assessments` | Multipart `assessment_id`, `photo`, optional `profiles` JSON array, `household_context`; retains upload and returns `ready` |
 | `GET /v1/assessments/latest` | Latest assessment for this device; skips deletions in progress; 404 if none |
 | `GET /v1/assessments/{aid}` | Current state, findings and linked submissions |
