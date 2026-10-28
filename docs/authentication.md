@@ -166,6 +166,10 @@ object/database/identity failures; orphan descendants; receipt expiry/recovery;
 secure adapter restoration; initial-load/sign-out draining; browser registration,
 verification, reset, pending/completed deletion and bootstrap recovery. Browser
 traces are disabled for authenticated flows so captured requests cannot retain
-credentials or action codes. Login layout was inspected at a 390px phone width.
+credentials or action codes. Login layout was inspected at a 390px phone width. Android and iOS production
+bundles compile successfully; this does not establish native runtime behavior.
+Deletion-status calls have a 20-second timeout, are cancelled on account changes,
+and discard late results from former sessions. Signing out remains available
+while a status request is stalled.
 Both independent code-review axes were run, and their actionable findings were
 addressed before final validation. Platform and cloud limitations above still apply.

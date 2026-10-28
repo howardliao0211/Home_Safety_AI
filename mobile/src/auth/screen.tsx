@@ -78,6 +78,7 @@ export function AuthScreen({
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const working = useRef(false);
+  const leaving = useRef(false);
   const [message, setMessage] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const passwordRef = useRef<React.ComponentRef<typeof TextInput>>(null);
@@ -95,7 +96,8 @@ export function AuthScreen({
       await work();
       setMessage(success);
     } catch (error) {
-      setMessage(authMessage(error));
+      if ((error as { code?: string }).code !== "session_changed")
+        setMessage(authMessage(error));
     } finally {
       setPassword("");
       working.current = false;
@@ -203,9 +205,18 @@ export function AuthScreen({
               }
             />
             <AuthAction
-              busy={busy}
               label="Sign out while cleanup continues"
-              onPress={() => void act(auth.logout)}
+              disabled={leaving.current}
+              onPress={() => {
+                if (leaving.current) return;
+                leaving.current = true;
+                void auth
+                  .logout()
+                  .catch((error) => setMessage(authMessage(error)))
+                  .finally(() => {
+                    leaving.current = false;
+                  });
+              }}
             />
           </>
         ) : auth.user ? (

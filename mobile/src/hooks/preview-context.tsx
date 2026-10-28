@@ -510,6 +510,10 @@ function usePreviewState(session: Session) {
     annotationClient: backend,
     refreshLatestAssessment: () =>
       act(async () => {
+        if (!apiEnabled)
+          throw new Error(
+            "Connect to the service to refresh an account assessment.",
+          );
         await refreshLatest();
         return true;
       }),

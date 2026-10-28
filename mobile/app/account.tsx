@@ -1,8 +1,10 @@
+import { apiEnabled } from "@/api/config";
 import { AuthScreen } from "@/auth/screen";
 import { usePreview } from "@/hooks/preview-context";
-import { router } from "expo-router";
+import { router, Redirect } from "expo-router";
 export default function Account() {
   const { busy, refreshLatestAssessment } = usePreview();
+  if (!apiEnabled) return <Redirect href="/" />;
   return (
     <AuthScreen
       account

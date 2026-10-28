@@ -47,6 +47,13 @@ function useAccountState() {
   const [deletionComplete, setDeletionComplete] = useState(false);
   const [accountRestricted, setAccountRestricted] = useState(false);
   const [blocked, setBlocked] = useState(false);
+  const generation = useRef(0);
+  const accountRequests = useRef(new Set<AbortController>());
+  function invalidateRequests() {
+    generation.current++;
+    accountRequests.current.forEach((controller) => controller.abort());
+    accountRequests.current.clear();
+  }
   const resetNavigation = useRef(false);
   const lastUid = useRef<string | null>(null);
   const cleanups = useRef(new Set<() => Promise<void>>());
@@ -59,6 +66,7 @@ function useAccountState() {
     const unsubscribe = onIdTokenChanged(auth, async (next) => {
       if (!active) return;
       if (lastUid.current && lastUid.current !== next?.uid) {
+        invalidateRequests();
         resetNavigation.current = true;
         setBlocked(true);
         try {
@@ -94,10 +102,12 @@ function useAccountState() {
     }
   }
   async function logout() {
+    invalidateRequests();
     resetNavigation.current = true;
     setBlocked(true);
     try {
       await clearLocal();
+      lastUid.current = null;
       await signOut(auth);
       setUser(null);
       setAccountRestricted(false);
@@ -143,19 +153,49 @@ function useAccountState() {
     }
   }
   async function request(path: string, headers: Record<string, string>) {
-    const response = await fetch(apiConfig.baseUrl + path, {
-      method: "POST",
-      headers,
-    });
-    const body = await response.json();
-    if (!response.ok)
+    const epoch = generation.current;
+    const controller = new AbortController();
+    accountRequests.current.add(controller);
+    const timer = setTimeout(() => controller.abort(), 20_000);
+    try {
+      const response = await fetch(apiConfig.baseUrl + path, {
+        method: "POST",
+        headers,
+        signal: controller.signal,
+      });
+      const body = await response.json();
+      if (epoch !== generation.current)
+        throw new ApiError(
+          "The account session changed.",
+          409,
+          "session_changed",
+        );
+      if (!response.ok)
+        throw new ApiError(
+          body.error?.message || "Retry when connected.",
+          response.status,
+          body.error?.code || "request_failed",
+        );
+      return body;
+    } catch (error) {
+      if (epoch !== generation.current)
+        throw new ApiError(
+          "The account session changed.",
+          409,
+          "session_changed",
+        );
+      if (error instanceof ApiError) throw error;
       throw new ApiError(
-        body.error?.message || "Retry when connected.",
-        response.status,
-        body.error?.code || "request_failed",
+        "Could not reach the account service. Check your connection and retry.",
+        503,
+        "network",
       );
-    return body;
+    } finally {
+      clearTimeout(timer);
+      accountRequests.current.delete(controller);
+    }
   }
+
   return {
     user,
     ready,
@@ -180,12 +220,14 @@ function useAccountState() {
     },
     logout,
     login: async (email: string, password: string) => {
+      invalidateRequests();
       resetNavigation.current = true;
       setDeletionComplete(false);
       setMessage("");
       await signInWithEmailAndPassword(auth, email.trim(), password);
     },
     register: async (email: string, password: string) => {
+      invalidateRequests();
       resetNavigation.current = true;
       setDeletionComplete(false);
       // Firebase's Auth emulator does not implement getPasswordPolicy. Keep the
@@ -256,16 +298,24 @@ function useAccountState() {
       }
     },
     deleteAccount: async (password: string) => {
+      invalidateRequests();
+      const epoch = generation.current;
       const current = auth.currentUser;
       if (!current?.email) throw new Error("Sign in again.");
       await reauthenticateWithCredential(
         current,
         EmailAuthProvider.credential(current.email, password),
       );
+      if (epoch !== generation.current || auth.currentUser?.uid !== current.uid)
+        return;
       const token = await current.getIdToken(true);
+      if (epoch !== generation.current || auth.currentUser?.uid !== current.uid)
+        return;
       const result = await request("/v1/account/deletion", {
         Authorization: `Bearer ${token}`,
       });
+      if (epoch !== generation.current || auth.currentUser?.uid !== current.uid)
+        return;
       // Retain a session-independent receipt before dropping the private app tree.
       const cleanup = clearLocal();
       setReceipt(result.receipt);
@@ -274,13 +324,22 @@ function useAccountState() {
     },
     pollDeletion: async () => {
       if (!receipt) return;
+      const epoch = generation.current;
+      const uid = auth.currentUser?.uid;
+      const current = () =>
+        epoch === generation.current && auth.currentUser?.uid === uid;
       const result = await request("/v1/account/deletion/status", {
         "X-Deletion-Receipt": receipt,
       });
+      if (!current()) return;
       if (result.status === "complete") {
         await clearLocal();
+        if (!current()) return;
+        lastUid.current = null;
         await signOut(auth);
+        if (epoch !== generation.current) return;
         await receiptStorage.removeItem(receiptKey);
+        if (epoch !== generation.current) return;
         setReceipt(null);
         setUser(null);
         setDeletionComplete(true);
