@@ -20,6 +20,16 @@ variable "annotation_worker_url" {
   }
 }
 
+variable "annotation_queue_name" {
+  description = "Cloud Tasks queue ID. Choose a fresh name after deletion while Google blocks reuse of the previous name."
+  type        = string
+  default     = "home-safety-annotations"
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_-]{1,100}$", var.annotation_queue_name))
+    error_message = "Use 1 to 100 letters, digits, underscores or hyphens."
+  }
+}
+
 variable "demo_token_initialized" {
   description = "Enable Terraform runtime token IAM after the external token secret has been initialized."
   type        = bool

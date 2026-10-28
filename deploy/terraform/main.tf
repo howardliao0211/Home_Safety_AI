@@ -122,7 +122,7 @@ resource "google_secret_manager_secret_iam_member" "backend" {
 # Dispatch survives Cloud Run request/process lifetimes. Each highlight attempt is
 # its own task and Firestore claim; limits admit 12 overlapping attempts per assessment.
 resource "google_cloud_tasks_queue" "annotations" {
-  name     = "home-safety-annotations"
+  name     = var.annotation_queue_name
   location = var.region
   rate_limits {
     max_dispatches_per_second = 20

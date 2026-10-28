@@ -96,6 +96,13 @@ services may still incur charges. A later `start` provisions resources again and
 automatically updates phone and worker configuration with the current service URL.
 Omitting `start`/`stop` retains the original `start` behavior.
 
+Cloud Tasks can block reuse of a deleted queue name for up to three days. If
+`start` reports that a queue with this name existed too recently, set
+`annotation_queue_name` to a fresh ID in the private
+`deploy/terraform/deploy.tfvars.json` and rerun `start`. Keep that ID on subsequent
+deployments; changing it replaces the queue. The default is
+`home-safety-annotations`.
+
 Run from the repository root:
 
 ```bash

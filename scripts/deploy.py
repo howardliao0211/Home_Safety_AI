@@ -64,9 +64,16 @@ class Deployment:
         # Preserve recovery on repeated deployments; finish refreshes its URL.
         worker_url = ""
         state = ROOT / "deploy/terraform/terraform.tfstate"
-        if state.exists() and json.loads(state.read_text()).get("resources"):
-            config = self.output("deployment_config")
-            worker_url = config.get("annotation_worker_url", "")
+        if state.exists():
+            saved_state = json.loads(state.read_text())
+            if saved_state.get("resources"):
+                if "deployment_config" in saved_state.get("outputs", {}):
+                    config = self.output("deployment_config")
+                    worker_url = config.get("annotation_worker_url", "")
+                elif VARIABLES.exists():
+                    # Older or partially applied state may not have this output yet.
+                    # Keep the saved target until apply can populate the output.
+                    worker_url = json.loads(VARIABLES.read_text()).get("annotation_worker_url", "")
         self.save_variables(annotation_worker_url=worker_url)
         self.apply()
         run([*self.backend, "secrets", "--provider", "muse"])

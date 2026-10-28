@@ -21,7 +21,7 @@ examples and works without a backend or credentials.
   On WSL, start Docker Desktop and enable integration for your distro.
 - A browser for web preview.
 - Optional: an Android phone with an Expo Go version compatible with the
-  project's Expo SDK **57**, available through [Expo Go](https://expo.dev/go).
+  project's Expo SDK **58**, available through [Expo Go](https://expo.dev/go).
 
 Android Studio is only needed if you want to use an Android emulator. Browser
 preview and a physical phone running Expo Go do not require it.

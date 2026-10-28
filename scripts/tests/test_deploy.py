@@ -65,7 +65,10 @@ class DeploymentTests(unittest.TestCase):
             root = Path(directory)
             state = root / "deploy/terraform/terraform.tfstate"
             state.parent.mkdir(parents=True)
-            state.write_text(json.dumps({"resources": [{"type": "google_cloud_tasks_queue"}]}))
+            state.write_text(json.dumps({
+                "resources": [{"type": "google_cloud_tasks_queue"}],
+                "outputs": {"deployment_config": {"value": {}}},
+            }))
             with (
                 patch.object(deploy, "ROOT", root),
                 patch.object(self.deployment, "output", return_value={
@@ -82,6 +85,34 @@ class DeploymentTests(unittest.TestCase):
                 })
                 release.assert_called_once_with(highlights=True)
                 self.assertEqual(run.call_args.args[0][-1], "phone-env")
+
+    def test_bootstrap_recovers_state_without_deployment_config_output(self):
+        for saved_url in ("", "https://service.run.app"):
+            with self.subTest(saved_url=saved_url), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                state = root / "deploy/terraform/terraform.tfstate"
+                state.parent.mkdir(parents=True)
+                state.write_text(json.dumps({
+                    "resources": [{"type": "google_storage_bucket"}],
+                    "outputs": {"project_id": {"value": "home-safety-ai"}},
+                }))
+                variables = state.parent / "deploy.tfvars.json"
+                variables.write_text(json.dumps({"annotation_worker_url": saved_url}))
+                with (
+                    patch.object(deploy, "ROOT", root),
+                    patch.object(deploy, "VARIABLES", variables),
+                    patch.object(self.deployment, "output", side_effect=AssertionError("Output is missing")),
+                    patch.object(self.deployment, "save_variables") as save,
+                    patch.object(self.deployment, "apply") as apply,
+                    patch.object(self.deployment, "release") as release,
+                    patch.object(deploy, "run"),
+                ):
+                    self.deployment.bootstrap()
+                self.assertEqual(save.call_args_list[0].kwargs, {
+                    "annotation_worker_url": saved_url,
+                })
+                self.assertEqual(apply.call_count, 2)
+                release.assert_called_once_with(highlights=bool(saved_url))
 
     def test_private_variables_preserve_existing_configuration(self):
         with tempfile.TemporaryDirectory() as directory:
