@@ -246,8 +246,17 @@ def main() -> int:
         if command == "apply":
             # An externally created destroy plan must not bypass ordered teardown.
             changes = inspect_plan(terraform, extra[0], env)
-            if changes and all(
-                c["change"]["actions"] in (["delete"], ["no-op"]) for c in changes
+            dependencies = {
+                "google_firestore_database",
+                "google_storage_bucket",
+                "google_service_account",
+                "google_cloud_tasks_queue",
+                "google_artifact_registry_repository",
+                "google_secret_manager_secret",
+            }
+            if any(
+                c.get("type") in dependencies and c["change"]["actions"] == ["delete"]
+                for c in changes
             ):
                 raise RuntimeError(
                     "Use destroy for teardown so Cloud Run is removed before its dependencies."

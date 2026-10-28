@@ -79,7 +79,7 @@ def test_release_verifier_exercises_real_auth_upload_scoping_and_cleanup(product
             "Client",
             lambda **kwargs: real_client(**kwargs, transport=httpx.MockTransport(forward)),
         )
-        deploy.Deployer.verify_url("https://candidate.run.app", "fake-demo-token")
+        deploy.Deployer.verify_url("https://candidate---service.run.app", "fake-demo-token")
     assert repository.records == {} and photos.objects == {} and provider.calls == []
 
 

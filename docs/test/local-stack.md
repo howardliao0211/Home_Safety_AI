@@ -1,7 +1,7 @@
 # Local stack script
 
 Complete the [development setup](../../README.md#development-environment),
-including dependencies and both environment files. The script uses Python's
+including dependencies and the root `.env`. The script uses Python's
 standard library and targets Linux/WSL with Bash and Docker Compose.
 
 ## Start
@@ -20,8 +20,8 @@ from `scripts/frontend-env.sh`. Dependencies must already be installed.
 The script runs the API at `http://127.0.0.1:8000` and Expo at
 `http://localhost:8081`. It selects API mode and points Expo to that local API
 for this session, overriding `EXPO_PUBLIC_DATA_SOURCE` and
-`EXPO_PUBLIC_API_URL` without editing `mobile/.env`. The demo token still comes
-from your existing frontend environment. Keep it aligned with the backend token
+`EXPO_PUBLIC_API_URL` without editing root `.env`. The demo token comes
+from root `.env` or an explicit process override. Keep it aligned with the backend token
 when configured. Provider credentials stay in the backend configuration.
 
 The script also starts the highlight worker

@@ -58,7 +58,6 @@ class LifecycleTests(unittest.TestCase):
         ):
             (self.root / directory).mkdir(parents=True)
         (self.root / ".env").touch()
-        (self.root / "mobile/.env").touch()
         (self.root / "backend/.venv/bin/python").symlink_to(sys.executable)
         (self.root / "backend/uvicorn.py").write_text(SERVER)
         (self.root / "server.py").write_text(SERVER)

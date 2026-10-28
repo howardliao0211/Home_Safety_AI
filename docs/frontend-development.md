@@ -12,8 +12,9 @@ Then, from the repository root in another Bash terminal (including WSL):
 
 ```bash
 source scripts/frontend-env.sh
+# Only if the root .env does not exist:
+cp -n .env.example .env
 cd mobile
-cp .env.example .env
 npm run web
 ```
 
@@ -51,7 +52,7 @@ npm start
 ```
 
 For API mode, bind Uvicorn to `0.0.0.0` and set `EXPO_PUBLIC_API_URL` in
-`mobile/.env` to `http://<development-machine-LAN-IP>:8000`. Use
+the root `.env` to `http://<development-machine-LAN-IP>:8000`. Use
 `http://10.0.2.2:8000` for an Android emulator. Restart Expo after changes.
 Scan the terminal's QR code with Expo Go. The phone must be able to reach the
 development machine on the same network. SDK 57 is selected to follow Expo's
@@ -93,7 +94,10 @@ for the connected assessment checklist and device journeys.
 
 ## Backend integration
 
-`mobile/.env.example` documents the public client settings:
+The root `.env.example` documents the public client settings. npm launch commands
+load only `EXPO_PUBLIC_` entries from root `.env`, with explicit process overrides
+taking precedence. They ignore `mobile/.env`; restart Expo after changes.
+For the GCP phone test, use the [deployment guide](../deploy/README.md).
 
 | Variable | Behavior |
 | --- | --- |

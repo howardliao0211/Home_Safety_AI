@@ -10,6 +10,19 @@ SOURCE_LABEL = "ai.home-safety.source-sha256"
 BUILD_COMMAND = "backend/.venv/bin/python scripts/deploy-gcp.py build"
 
 
+def build_command(tag):
+    return [
+        "docker",
+        "build",
+        "--platform=linux/amd64",
+        "--label",
+        f"{SOURCE_LABEL}={source_hash()}",
+        "--tag",
+        tag,
+        str(ROOT / "backend"),
+    ]
+
+
 def source_hash():
     backend = ROOT / "backend"
     paths = [

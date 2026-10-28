@@ -24,7 +24,7 @@ from dotenv import dotenv_values, set_key
 
 # Also support loading this CLI with importlib from backend integration tests.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from gcp_image import BUILD_COMMAND, SOURCE_LABEL, source_hash
+from gcp_image import build_command, source_hash
 
 ROOT = Path(__file__).resolve().parents[1]
 TERRAFORM = ROOT / "deploy/terraform"
@@ -65,7 +65,11 @@ class Deployer:
             command, input=input, text=True, capture_output=True, env=env, check=False
         )
         if result.returncode:
-            if missing_ok and "NOT_FOUND" in result.stderr:
+            missing_service = (
+                command[1:4] == ["run", "services", "describe"]
+                and f"Cannot find service [{self.config.service_name}]" in result.stderr
+            )
+            if missing_ok and ("NOT_FOUND" in result.stderr or missing_service):
                 return None
             # Never relay a cloud/SDK exception body verbatim with known secrets.
             message = result.stderr.strip() or "Command failed"
@@ -190,18 +194,7 @@ class Deployer:
         )
 
     def build(self, tag):
-        self.run(
-            [
-                "docker",
-                "build",
-                "--platform=linux/amd64",
-                "--label",
-                f"{SOURCE_LABEL}={source_hash()}",
-                "--tag",
-                tag,
-                str(ROOT / "backend"),
-            ]
-        )
+        self.run(build_command(tag))
 
     def build_push(self, tag):
         if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,100}", tag) or tag == "latest":
@@ -439,7 +432,12 @@ class Deployer:
         from urllib.parse import urlsplit
 
         hostname = urlsplit(self.config.api_url).hostname
-        resolved = {item[4][0] for item in socket.getaddrinfo(hostname, 443)}
+        try:
+            resolved = {item[4][0] for item in socket.getaddrinfo(hostname, 443)}
+        except OSError as error:
+            raise DeploymentError(
+                "API hostname DNS lookup failed; check domain delegation and propagation."
+            ) from error
         if resolved != {self.config.load_balancer_ip}:
             raise DeploymentError(
                 "API hostname does not resolve to the reserved load-balancer IP."
@@ -530,7 +528,10 @@ class Deployer:
 
     @staticmethod
     def verify_url(url, token):
-        if not re.fullmatch(r"https://[a-z0-9]+(?:[.-][a-z0-9]+)+", url):
+        if not re.fullmatch(
+            r"https://(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?",
+            url,
+        ):
             raise DeploymentError("Expected an HTTPS API origin without a path.")
         device, assessment = str(uuid4()), str(uuid4())
         path = f"/v1/assessments/{assessment}"
@@ -613,7 +614,7 @@ def main():
     build = sub.add_parser("build", help="Build a local image without cloud access")
     build.add_argument("--tag", default="home-safety-backend:dev")
     secret = sub.add_parser(
-        "secrets", help="Upload Groq key and initialize/reuse a demo token"
+        "secrets", help="Upload selected model key and initialize/reuse a demo token"
     )
     secret.add_argument("--provider", choices=["groq", "muse"], default="groq")
     secret.add_argument("--env-file", type=Path, default=ROOT / ".env")
@@ -655,21 +656,9 @@ def main():
     os.umask(0o077)
     try:
         if args.command == "build":
-            subprocess.run(
-                [
-                    "docker",
-                    "build",
-                    "--platform=linux/amd64",
-                    "--label",
-                    f"{SOURCE_LABEL}={source_hash()}",
-                    "--tag",
-                    args.tag,
-                    str(ROOT / "backend"),
-                ],
-                check=True,
-            )
+            subprocess.run(build_command(args.tag), check=True)
             print(
-                f"Current local backend image built. Provision through scripts/terraform-gcp.py; rebuild with {BUILD_COMMAND}."
+                "Current local backend image built. Provision through scripts/terraform-gcp.py."
             )
             return 0
         deployer = Deployer(load_config(), args.account)
