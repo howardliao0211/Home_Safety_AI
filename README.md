@@ -115,8 +115,8 @@ After completing setup above, run from the repository root on Linux or WSL:
 python3 scripts/local-test.py start
 ```
 
-The script starts the storage emulators, API on port 8000, and frontend on port
-8081 in the background. Open <http://localhost:8081> on the development machine
+The script starts the storage emulators, API on port 8000, highlight worker, and
+frontend on port 8081 in the background. Open <http://localhost:8081> on the development machine
 once it reports ready. Logs are saved under `.tools/local-test/`.
 Stop any manually started API or frontend first; the script reports port
 conflicts rather than replacing existing servers.
@@ -128,7 +128,7 @@ provider and consumes model quota. Local API docs are at
 <http://127.0.0.1:8000/healthz>. If configured, the demo bearer token is required
 for API requests, including health checks.
 
-To stop the managed frontend, API, and storage emulators:
+To stop the managed frontend, worker, API, and storage emulators:
 
 ```bash
 python3 scripts/local-test.py stop
@@ -151,6 +151,6 @@ preview mode, and Android device testing.
 | `mobile/src/storage/` | Local persistence and photo retention |
 | `mobile/tests/` | State tests and browser journeys |
 | `backend/` | FastAPI assessment backend, Muse/Groq adapters, Firestore/GCS storage and tests |
-| `scripts/local-test.py` | Start and stop the local frontend, API, and storage stack |
+| `scripts/local-test.py` | Start and stop the local frontend, API, highlight worker, and storage stack |
 | `docs/test/` | Automated checks, manual journeys, and device testing |
 | `deploy/terraform/` | Shared Cloud Run infrastructure, storage, registry and secret IAM |

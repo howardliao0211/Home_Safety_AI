@@ -19,9 +19,12 @@ spec = importlib.util.spec_from_file_location("local_test", SCRIPT)
 local = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(local)
 
-SERVER = """import http.server, os, sys
+SERVER = """import http.server, os, sys, time
 if os.environ.get("FAIL_FRONTEND") and "--port" not in sys.argv:
     sys.exit(2)
+# Gives an exiting worker time to finish before start checks it.
+if os.environ.get("FAIL_WORKER"):
+    time.sleep(1)
 port = int(sys.argv[sys.argv.index("--port") + 1] if "--port" in sys.argv else sys.argv[-1])
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -29,6 +32,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"ready")
 http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+"""
+
+WORKER = """import os, sys, time
+if os.environ.get("FAIL_WORKER"):
+    sys.exit("Configure MUSE and MUSE_SEGMENTATION_MODEL before running the worker.")
+time.sleep(600)
 """
 
 
@@ -40,13 +49,20 @@ class LifecycleTests(unittest.TestCase):
         warnings.simplefilter("ignore", ResourceWarning)
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        for directory in ("backend/.venv/bin", "mobile/node_modules", "scripts", "bin"):
+        for directory in (
+            "backend/.venv/bin",
+            "backend/app/annotations",
+            "mobile/node_modules",
+            "scripts",
+            "bin",
+        ):
             (self.root / directory).mkdir(parents=True)
         (self.root / ".env").touch()
         (self.root / "mobile/.env").touch()
         (self.root / "backend/.venv/bin/python").symlink_to(sys.executable)
         (self.root / "backend/uvicorn.py").write_text(SERVER)
         (self.root / "server.py").write_text(SERVER)
+        (self.root / "backend/app/annotations/local_worker.py").write_text(WORKER)
         for name, body in {
             "docker": 'printf "%s\\n" "$*" >> "$TEST_DOCKER_LOG"\n',
             "npm": 'exec "$TEST_PYTHON" "$TEST_SERVER" "${@: -1}"\n',
@@ -79,7 +95,7 @@ class LifecycleTests(unittest.TestCase):
         local.STATE.mkdir(parents=True)
 
     def tearDown(self):
-        for name in self.ports:
+        for name in local.PROCESSES:
             local.stop_process(name)
         while True:
             try:
@@ -95,15 +111,17 @@ class LifecycleTests(unittest.TestCase):
 
     def test_start_repeat_and_stop_repeat(self):
         local.start()
-        records = {name: local.load_process(name) for name in self.ports}
+        records = {name: local.load_process(name) for name in local.PROCESSES}
         self.assertTrue(all(records.values()))
         local.start()
         self.assertEqual(
-            records, {name: local.load_process(name) for name in self.ports}
+            records, {name: local.load_process(name) for name in local.PROCESSES}
         )
         local.stop()
         local.stop()
-        self.assertTrue(all(local.load_process(name) is None for name in self.ports))
+        self.assertTrue(
+            all(local.load_process(name) is None for name in local.PROCESSES)
+        )
         commands = (self.root / "docker.log").read_text()
         self.assertEqual(commands.count("up -d"), 1)
         self.assertEqual(commands.count("stop"), 2)
@@ -123,8 +141,21 @@ class LifecycleTests(unittest.TestCase):
             self.assertRaisesRegex(RuntimeError, "frontend exited"),
         ):
             local.start()
-        self.assertIsNone(local.load_process("backend"))
-        self.assertFalse((local.STATE / "backend.json").exists())
+        for name in ("backend", "worker"):
+            self.assertIsNone(local.load_process(name))
+            self.assertFalse((local.STATE / f"{name}.json").exists())
+
+    def test_unconfigured_worker_does_not_block_start(self):
+        with (
+            patch.dict(os.environ, {"FAIL_WORKER": "1"}),
+            patch("builtins.print") as output,
+        ):
+            local.start()
+        self.assertTrue(local.load_process("backend"))
+        self.assertTrue(local.load_process("frontend"))
+        self.assertFalse((local.STATE / "worker.json").exists())
+        notes = " ".join(str(call.args[0]) for call in output.call_args_list)
+        self.assertIn("highlights stay queued", notes)
 
     def test_stale_record_does_not_kill_unrelated_process(self):
         process = subprocess.Popen(

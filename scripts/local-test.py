@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start or stop the local storage emulators, FastAPI, and Expo (Linux/WSL)."""
+"""Start or stop local storage, FastAPI, the highlight worker, and Expo (Linux/WSL)."""
 
 import argparse
 import fcntl
@@ -18,6 +18,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 STATE = ROOT / ".tools/local-test"
 PORTS = {"backend": 8000, "frontend": 8081}
+# The worker has no port; it runs saved highlight attempts that local mode never dispatches.
+PROCESSES = ("backend", "worker", "frontend")
 
 
 def identity(pid):
@@ -182,6 +184,15 @@ def start():
         )
         started.append("backend")
         wait_ready("backend", backend, "/healthz")
+        print("Starting highlight worker…", flush=True)
+        # A worker left behind by a crashed stack would otherwise run twice.
+        stop_process("worker")
+        worker = launch(
+            "worker",
+            [str(python), "-m", "app.annotations.local_worker"],
+            ROOT / "backend",
+        )
+        started.append("worker")
         print("Starting frontend…", flush=True)
         frontend = launch(
             "frontend",
@@ -210,6 +221,13 @@ def start():
             file=sys.stderr,
         )
         raise
+    # The worker exits on purpose when MUSE segmentation is not configured.
+    if worker.poll() is not None:
+        (STATE / "worker.json").unlink(missing_ok=True)
+        print(
+            f"Highlight worker is not running; highlights stay queued. "
+            f"See {STATE / 'worker.log'}"
+        )
     print(
         f"Ready: http://localhost:{PORTS['frontend']}\n"
         f"API docs: http://127.0.0.1:{PORTS['backend']}/docs\n"
@@ -219,7 +237,7 @@ def start():
 
 
 def stop():
-    for name in reversed(PORTS):
+    for name in reversed(PROCESSES):
         stop_process(name)
     compose("stop")
     print("Local stack stopped. Emulator data is preserved.")
