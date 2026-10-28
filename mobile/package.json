@@ -36,11 +36,11 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "start": "expo start",
-    "android": "expo start --android",
-    "web": "expo start --web",
+    "start": "node ../scripts/expo.cjs start",
+    "android": "node ../scripts/expo.cjs start --android",
+    "web": "node ../scripts/expo.cjs start --web",
     "typecheck": "tsc --noEmit",
-    "start:tunnel": "expo start --tunnel",
+    "start:tunnel": "node ../scripts/expo.cjs start --tunnel",
     "test": "tsx --test tests/*.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:api": "playwright test -c playwright.api.config.ts",

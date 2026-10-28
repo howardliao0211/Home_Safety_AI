@@ -86,15 +86,8 @@ and provider configuration.
 
 ### Frontend configuration
 
-From the repository root:
-
-```bash
-cd mobile
-# Only if mobile/.env does not already exist:
-cp .env.example .env
-```
-
-Confirm these settings in `mobile/.env`:
+Configure client settings in the root `.env` (the same file used for backend
+configuration):
 
 ```dotenv
 EXPO_PUBLIC_DATA_SOURCE=api
@@ -102,10 +95,15 @@ EXPO_PUBLIC_API_URL=http://127.0.0.1:8000
 EXPO_PUBLIC_DEMO_TOKEN=
 ```
 
-Leave `EXPO_PUBLIC_DEMO_TOKEN` empty unless the backend has
-`DEMO_BEARER_TOKEN` configured; if configured, set both to the same value.
-The shared demo token is client-visible. Never put model API keys in the
-frontend. Restart Expo after changing its environment.
+Expo launch commands load only `EXPO_PUBLIC_` entries from that file. Explicit
+process environment overrides take precedence; `mobile/.env` is unnecessary and
+is ignored by these commands. Leave the demo token empty unless the backend
+requires it, then use the same value as `DEMO_BEARER_TOKEN`. Model credentials
+stay backend-only. Restart Expo after changing configuration.
+
+For an Android Expo Go test against GCP, follow the
+[phone deployment guide](deploy/README.md). It uses a stable HTTPS custom API
+hostname, a persistent demo token, and `npm run start:tunnel` from `mobile/`.
 
 ## Test the frontend and backend locally
 

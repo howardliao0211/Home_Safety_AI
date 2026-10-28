@@ -9,6 +9,9 @@ locals {
     "artifactregistry.googleapis.com",
     "cloudtasks.googleapis.com",
     "cloudscheduler.googleapis.com",
+    "compute.googleapis.com",
+    "dns.googleapis.com",
+    "domains.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "firestore.googleapis.com",
     "iam.googleapis.com",
@@ -91,13 +94,25 @@ resource "google_artifact_registry_repository" "backend" {
 }
 
 resource "google_secret_manager_secret" "backend" {
-  for_each  = toset(["groq-api-key", "muse-api-key", "demo-bearer-token"])
+  for_each  = toset(["groq-api-key", "muse-api-key"])
   secret_id = "home-safety-${each.key}"
   labels    = local.labels
   replication {
     auto {}
   }
   depends_on = [google_project_service.required]
+}
+
+# Token container and versions are initialized by the release CLI and survive
+# destroy/recreate. Its runtime access binding has the infrastructure lifecycle.
+resource "google_secret_manager_secret_iam_member" "demo" {
+  project   = var.project_id
+  secret_id = "home-safety-demo-bearer-token"
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.backend.email}"
+  # Binding is created by the secrets command after first provisioning, because
+  # the independently managed secret need not exist yet.
+  count = var.demo_token_initialized ? 1 : 0
 }
 
 resource "google_secret_manager_secret_iam_member" "backend" {

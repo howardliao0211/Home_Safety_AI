@@ -148,9 +148,9 @@ def start():
         raise RuntimeError(
             "Install backend and frontend dependencies using the README first."
         )
-    if not (ROOT / ".env").exists() or not (ROOT / "mobile/.env").exists():
+    if not (ROOT / ".env").exists():
         raise RuntimeError(
-            "Configure root .env and mobile/.env using the README first."
+            "Configure root .env using the README first."
         )
     # Check npm with the same Node environment used to launch Expo.
     subprocess.run(

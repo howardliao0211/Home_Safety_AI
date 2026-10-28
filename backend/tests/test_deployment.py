@@ -166,7 +166,8 @@ def test_secret_values_use_stdin_and_existing_demo_token_is_reused(
 
     monkeypatch.setattr(deploy.subprocess, "run", run)
     deploy.Deployer(config).publish_secrets(file)
-    assert len(calls) == 2 and calls[0][1] == "fake-groq-secret"
+    uploads = [(command, value) for command, value in calls if command[1:4] == ["secrets", "versions", "add"]]
+    assert len(uploads) == 1 and uploads[0][1] == "fake-groq-secret"
     assert all("fake-groq-secret" not in " ".join(command) for command, _ in calls)
     assert "fake-groq-secret" not in capsys.readouterr().out
 

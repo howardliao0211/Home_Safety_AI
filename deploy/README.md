@@ -1,285 +1,226 @@
-# Cloud Run backend deployment
+# GCP Android phone test
 
-Deploy the FastAPI backend to Cloud Run in `us-central1`, project
-`home-safety-ai`. The Expo app remains the client. Firestore/GCS hold durable
-assessment data and photos; Cloud Run containers hold no durable app state.
+The owner runs Expo Go on Android, the development computer runs the Expo tunnel,
+and FastAPI runs in project `home-safety-ai`, region `us-central1`. Keep resources
+and data until explicit destroy. No automatic teardown is installed. Readiness
+requires cloud auth/storage/TLS checks; real Muse and phone journeys are exploratory.
 
-The Docker image and workflows are implemented and verified locally. No Cloud
-Run service or new cloud resources have been provisioned by this change. The
-previous Compute Engine demo was destroyed on 2026-10-27; its reserved IP is no
-longer ours. This workflow supersedes the VM/nginx/Certbot deployment.
+## Ownership and prerequisites
 
-## Ownership and defaults
-
-| Component | Managed by |
+| Component | Owner |
 | --- | --- |
-| Required APIs, Artifact Registry, runtime service account, Firestore/GCS, secret containers and runtime IAM | `deploy/terraform/` |
-| Image builds/pushes, Cloud Run service configuration, revisions, public invocation and traffic | `scripts/deploy-gcp.py` |
-| Secret values and numbered versions | Release CLI `secrets` command, outside Terraform |
-| Model credentials | Secret Manager; referenced by numbered version on each revision |
+| Infrastructure lifecycle, local image gate, private local state/backups | `scripts/terraform-gcp.py` |
+| APIs, Artifact Registry, Firestore/GCS, service accounts/IAM, Tasks/Scheduler, DNS, global load balancer/IP/TLS | Terraform configuration |
+| Build/push, secret versions, Cloud Run revisions/traffic, verification, rollback, service deletion | `scripts/deploy-gcp.py` |
+| Domain registration and persistent demo-token secret | Outside phone-test Terraform state |
 
-Cloud Run starts with **1 CPU, 2 GiB RAM, concurrency 8, minimum 0, maximum 2
-instances**, request-based CPU allocation, and a **300-second request timeout**.
-These are starting settings, not measured capacity guarantees. Google supplies
-the HTTPS `run.app` URL; nginx, a public VM port, an IP certificate, and SSH are
-unnecessary. The container runs as UID/GID 10001 and listens on `0.0.0.0:$PORT`.
+Install Docker, gcloud, Terraform >=1.14 and <2, uv/Python >=3.10 and pinned Node.
+Sign in using `gcloud auth login`. The provisioning account needs API, storage,
+registry, service account/IAM, secrets, Tasks/Scheduler, Compute/DNS and Firestore
+permissions. Releases additionally need Cloud Run deployment/public invocation,
+service-account usage, image upload and secret-version access. Terraform never
+grants the operator permissions to itself. If Docker group membership was just
+added, open a new shell or use `sg docker`.
 
-Cloud Run invocation is public so the mobile client does not need a Google IAM
-identity token. FastAPI requires `Authorization: Bearer <demo token>` on API
-routes, including `/healthz`, and scopes records/photos by `X-Device-ID`.
-`/docs`, `/redoc`, `/openapi.json` and Swagger's OAuth redirect are disabled in
-production. Cloud Run uses its default TCP startup probe; HTTP verification
-supplies the token without putting it into probe configuration.
+All Terraform commands go through the wrapper, including init/plan/apply/destroy,
+validate/fmt/show/output. Put `--account=EMAIL` before either CLI's subcommand to
+override the active gcloud account. The wrapper passes a short-lived OAuth token
+only through the environment. It inspects release state and reports a next release
+command; it never silently builds, pushes or releases.
 
-## Local prerequisites and image check
+Cloud Run starts with 1 CPU, 2 GiB RAM, concurrency 8, minimum 0, maximum 2 instances,
+and a 300-second timeout. Invocation is public; FastAPI requires the demo bearer
+token and scopes records/photos by per-installation device ID. Production API docs
+are disabled. Model credentials stay backend-only. The phone uses a stable custom
+HTTPS hostname through a global external Application Load Balancer with regional
+serverless NEG, reserved global IPv4 and Google-managed TLS. Cloud Run's `run.app`
+URL remains available for tagged-revision verification.
 
-Install Docker Engine, gcloud, Terraform >=1.14 and <2, and uv/Python 3.10+.
-Run all commands below from the repository root:
+## Build and provision
+
+Run from the repository root:
 
 ```bash
 uv sync --project backend --extra dev --locked
-uv run --project backend python scripts/deploy-gcp.py build
+backend/.venv/bin/python scripts/deploy-gcp.py build
+python3 scripts/terraform-gcp.py init
+python3 scripts/terraform-gcp.py validate
+python3 scripts/terraform-gcp.py plan -out=phone.tfplan
+python3 scripts/terraform-gcp.py apply phone.tfplan
 ```
 
-This builds `home-safety-backend:dev` for Linux AMD64 without cloud access.
-`backend/Dockerfile` pins the Python/uv base images by digest and installs runtime
-packages from `backend/uv.lock`. The build context is only `backend/` and its
-`.dockerignore` allows application code and locked package metadata. Local `.env`,
-credentials, tests, Terraform state, development tools, and mobile assets do not
-enter the image. The image defaults to production; testing it with emulators
-requires an explicit `ENVIRONMENT=local` override.
+Review the saved plan displayed by apply, then type `apply`. Init/plan/apply require
+local `home-safety-backend:dev` labelled with a hash of current Dockerfile, Docker
+ignore rules, locked dependencies and application sources. Missing/stale images
+stop with the exact build command. No remote image is needed before Terraform
+creates Artifact Registry. Backend changes require a rebuild. Credentials, local
+`.env`, tests, Terraform state and mobile assets never enter the image.
 
-Docker's authenticated local health check runs `python -m app.healthcheck`.
-Cloud Run uses its own startup probe rather than Docker's HEALTHCHECK instruction.
+The wrapper keeps state/plans private and creates backups in the ignored
+`.tools/terraform-state-backups/`, including after failed applies. Keep another
+private off-machine backup. Never commit state/plans. An older state may own the
+demo-token secret: run `python3 scripts/terraform-gcp.py detach-demo-token`
+before migrating. This backs up state and leaves the live secret untouched. Never
+approve a plan deleting that secret. Preserve/import existing Firestore/GCS rather than replacing live
+storage to fix a state mismatch.
 
-## 1. Provision shared infrastructure
+## Secrets and first release
 
-Sign in with the account that can manage the existing billed project:
+Configure `MUSE_API_KEY` and `MUSE_MAIN_MODEL` in root `.env`:
 
 ```bash
-gcloud auth login
-gcloud auth list
-# Copy only if you do not already have a tfvars file.
-cp deploy/terraform/terraform.tfvars.example deploy/terraform/terraform.tfvars
-terraform -chdir=deploy/terraform init
-terraform -chdir=deploy/terraform validate
-python3 scripts/terraform-gcp.py plan -out=cloud-run.tfplan
-python3 scripts/terraform-gcp.py apply cloud-run.tfplan
-```
-
-Review the saved plan before applying. Existing VM-era tfvars must remove
-`certificate_email`, `zone`, and `machine_type`; the new inputs are `project_id`
-and `region`. This configuration preserves the Terraform resource addresses
-and names for Firestore, GCS, and the dedicated service account. Restoring an
-older state with live VM resources will propose deleting the VM/network/IP;
-inspect that plan before applying. Do not replace existing storage to resolve a
-state mismatch. Import matching existing storage or restore its state instead.
-
-The provisioning account needs permissions to enable APIs, manage Artifact
-Registry, Firestore, Storage, Secret Manager and service accounts, and grant the
-runtime IAM bindings. The runtime identity receives `roles/datastore.user`,
-`roles/storage.objectUser` on the photo bucket only, and
-`roles/secretmanager.secretAccessor` on the two model/demo secrets only. Cloud
-Run captures stdout/stderr without an app logging-writer role. Same-project image
-pulls use Cloud Run's Google-managed service agent.
-
-The release operator additionally needs Artifact Registry upload access, Cloud
-Run service/traffic and public-invoker policy management, service-account usage,
-and access to add/read the selected Secret Manager versions. Terraform does not
-grant the operator roles to itself. A project owner may already have them.
-
-The existing Terraform wrapper selects the active gcloud account and passes a
-short-lived access token through the child environment. Use `--account=EMAIL`
-before its command to override that account. State and state backups remain
-local and ignored; keep a private off-machine backup. The release script reads
-only the non-secret `deployment_config` Terraform output. It never provisions
-infrastructure or runs Terraform apply.
-
-## 2. Initialize secrets
-
-Keep your working `GROQ_API_KEY` and `GROQ_MODEL` in the root `.env`:
-
-```bash
-uv run --project backend python scripts/deploy-gcp.py secrets
-```
-
-The command adds a numbered Groq-key version. On first use, it initializes the
-demo token from `DEMO_BEARER_TOKEN` if provided, otherwise generates a random
-token. Subsequent calls reuse the existing demo token. Secret bytes are sent via
-stdin pipes, not command arguments, files, image layers or Terraform state.
-Secret containers and access policies are provisioned by Terraform; the script
-only adds secret versions. It does not print secret values or change `.env`.
-
-To rotate the Groq key, update `.env`, run `secrets`, then release again.
-To deliberately rotate the demo token too:
-
-```bash
-uv run --project backend python scripts/deploy-gcp.py secrets --rotate-demo-token
-```
-
-A release resolves enabled versions and pins their actual version numbers.
-Existing revisions keep their original versions. Keep rollback revisions'
-versions enabled. The mobile client needs the demo token used by the serving
-revision; retrieve that specific version in your own Secret Manager console or
-terminal. Changing the token requires updating the client configuration.
-
-The local `.env` emulator/project settings are never copied into production.
-Production gets storage/project settings from Terraform outputs and key/token
-values from Secret Manager. The Google SDKs use the attached Cloud Run service
-identity through Application Default Credentials; no downloaded GCP key is needed.
-
-## 3. Release and verify
-
-```bash
-uv run --project backend python scripts/deploy-gcp.py release
-uv run --project backend python scripts/deploy-gcp.py status
-uv run --project backend python scripts/deploy-gcp.py verify
-```
-
-Pass `--account=EMAIL` before the subcommand when selecting a different operator.
-`release` reads the model ID from `GROQ_MODEL` in the process environment or root
-`.env`; override with `release --model=MODEL_ID` if needed. It builds a uniquely
-tagged image, pushes it to Artifact Registry, resolves its immutable digest,
-then deploys by that digest. Artifact Registry tags are immutable. Temporary
-Docker login configuration is removed after pushing. Build/push time does not
-consume Cloud Run instances.
-
-When a service already exists, the new revision receives a tagged HTTPS URL and
-no service traffic. Verification checks:
-
-- Missing/wrong tokens are rejected and authenticated health succeeds.
-- Production API documentation routes return 404.
-- A tiny generated photo/assessment can be created, read, retrieved through the
-  private-photo API, scoped to its device, and deleted using real Firestore/GCS.
-
-These checks do not call the model or consume Groq quota. Only after verification
-passes does the script route 100% of service traffic to the candidate. It then
-checks the service URL; if that check fails, it restores the prior revision.
-Failed candidate verification leaves prior service traffic unchanged. Failed
-candidates may retain their tagged URLs, still protected by the app's token.
-On the **first release**, Cloud Run creates the service and initial traffic before
-verification because there is no previous revision. A first-release failure is
-reported; inspect its logs/configuration, then release a correction.
-
-A deployment fixture is deleted in verification's cleanup step even when later
-checks fail. If storage deletion itself fails, finish removing that fixture after
-fixing permissions. Run one release/rollback at a time; this script deliberately
-manages a single revision serving 100% of traffic, rather than traffic splits.
-
-To reuse an already-pushed image:
-
-```bash
-uv run --project backend python scripts/deploy-gcp.py release   --image=us-central1-docker.pkg.dev/home-safety-ai/home-safety/backend@sha256:IMAGE_DIGEST
-```
-
-The image must belong to the provisioned backend repository. Image tags and
-Cloud Run revision names are separate: releases report the new revision and
-previous revision to make rollback explicit.
-
-## Rollback and operations
-
-```bash
-uv run --project backend python scripts/deploy-gcp.py rollback PREVIOUS_REVISION
-uv run --project backend python scripts/deploy-gcp.py verify
-gcloud run services logs read home-safety-demo --project=home-safety-ai --region=us-central1 --limit=50
-```
-
-Rollback checks that the target revision belongs to this service, gets the demo
-token version pinned on that revision, assigns it a verification URL, and verifies
-it before restoring traffic. It restores the revision's image and model/secret
-configuration; it does not roll back Firestore data. Old clients need the token
-corresponding to whichever revision serves traffic. Do not delete retained images,
-revisions, or secret versions while they are needed for rollback.
-
-Cold starts are expected with minimum 0. To keep one instance warm during a
-scheduled demo, then return to the normal default:
-
-```bash
-gcloud run services update home-safety-demo --project=home-safety-ai --region=us-central1 --min=1
-gcloud run services update home-safety-demo --project=home-safety-ai --region=us-central1 --min=0
-```
-
-A new scripted release reapplies minimum 0. Scale-to-zero avoids idle request-based
-compute charges, but storage, Artifact Registry, Secret Manager and network usage
-can still incur charges. Model waiting time is active request time on Cloud Run;
-Groq quotas and costs remain independent. There is no automatic model retry.
-
-## Removal
-
-Cloud Run service lifecycle belongs to the release workflow, outside Terraform.
-Delete it explicitly before removing its supporting resources:
-
-```bash
-gcloud run services delete home-safety-demo --project=home-safety-ai --region=us-central1
-python3 scripts/terraform-gcp.py plan -destroy -out=destroy.tfplan
-python3 scripts/terraform-gcp.py apply destroy.tfplan
-```
-
-Inspect the destroy plan. Existing user-approved Firestore/GCS deletion guards
-remain removed: full teardown can delete the database and photo objects. Secret
-container removal also removes its stored versions. Terraform state does not
-contain the versions' values, but state backups remain private.
-
-## Local verification
-
-```bash
-uv run --project backend pytest backend/tests -m 'not live' -q
-uv run --project backend ruff check --config backend/pyproject.toml backend scripts/deploy-gcp.py
-terraform -chdir=deploy/terraform fmt -check
-terraform -chdir=deploy/terraform validate
-```
-
-Automated checks cover production auth/docs behavior, the storage verifier,
-secret stdin handling, candidate failure without traffic promotion, post-promotion
-traffic restoration, and rollback using the revision's pinned secret version.
-A local container smoke check also verifies custom PORT binding, non-root runtime,
-health and storage CRUD with local emulators. Live GCP rollout/IAM checks require
-provisioning and remain separate from local verification.
-
-References: [Cloud Run container contract](https://docs.cloud.google.com/run/docs/container-contract),
-[secret versions](https://docs.cloud.google.com/run/docs/configuring/services/secrets),
-[deployment flags](https://docs.cloud.google.com/sdk/gcloud/reference/run/deploy),
-[billing](https://docs.cloud.google.com/run/docs/configuring/billing-settings).
-
-## Durable finding highlights
-
-Terraform provisions the annotation Cloud Tasks queue, enqueue/OIDC IAM, a
-collection-group dispatch index, and the Muse Secret Manager container. Cloud Run
-continues to be released by the release CLI. No infrastructure is applied merely
-by changing these files.
-
-For an existing deployment, set Terraform `annotation_worker_url` to the stable
-Cloud Run service origin (no revision tag/path) and apply Terraform. This also
-creates a once-per-minute authenticated Cloud Scheduler recovery job. On a fresh
-project, first release the backend without segmentation to obtain that URL, then
-set the variable and re-apply. Leave highlighting disabled until recovery exists.
-
-Upload a numbered Muse key and release explicitly:
-
-```sh
 backend/.venv/bin/python scripts/deploy-gcp.py secrets --provider muse
-backend/.venv/bin/python scripts/deploy-gcp.py release --provider muse \
-  --model YOUR_MUSE_MAIN_MODEL --segmentation-model sam-3.1
+backend/.venv/bin/python scripts/deploy-gcp.py release --provider muse --model YOUR_MUSE_MAIN_MODEL
 ```
 
-The release pins `MUSE_API_KEY` and the demo token to numbered secret versions,
-and sets the segmentation model, queue resource name, stable worker URL and
-worker service-account identity from Terraform outputs. Use `--provider groq`
-for existing Groq releases, which expose highlighting as unavailable.
-The public Cloud Run service verifies Google OIDC identity/audience inside the
-internal worker routes; the demo token cannot trigger workers. Cloud Tasks may
-redeliver infrastructure work, but Firestore atomically fences every started
-attempt. A lost attempt fails after lease expiry, and only explicit user retry
-starts new model work. Every finding's attempt is its own task, so attempts within
-one assessment run concurrently. Concurrency 8 on 2 instances and the queue's 24
-concurrent dispatches admit 12 overlapping attempts (the finding limit) once both
-instances are running; from a cold start, or under load, some attempts queue (ADR 0003).
+Every phone-test release explicitly selects Muse and its model. Groq is still the
+legacy CLI default for development. The secrets command uploads a numbered Muse-key
+version and initializes the external demo-token secret once, using configured
+`DEMO_BEARER_TOKEN` or generating a random token. Later calls reuse its enabled
+version and restore runtime secret access. Bytes travel through stdin pipes, never
+arguments, logs, images or Terraform state. Set `demo_token_initialized = true` in
+private `deploy/terraform/terraform.tfvars` after initialization so Terraform manages
+its runtime accessor binding on later applies. The secret itself survives destroy.
 
-A deployment smoke check should complete a multi-finding assessment without opening
-any finding, disconnect the client, inspect the persisted outcomes, deliver an
-already-started task twice, and temporarily deny enqueue permission to confirm the
-Scheduler recovers queued intent after restoring permission. Confirm exactly one
-SAM request and no main-model call per attempt, and verify a demo bearer token
-alone receives `401` on internal routes.
-Cloud delivery is covered locally with a fake Cloud Tasks transport and OIDC
-verifier; a real deployed Cloud Tasks/Scheduler smoke check remains required.
+Only rotate deliberately with `secrets --provider muse --rotate-demo-token`.
+Revisions pin numbered versions; retain enabled versions needed for rollback. If
+the external secret itself is deleted, create a replacement token and update root
+`.env`. The shared token is client-visible; model keys are never public variables.
+
+The initial release runs without segmentation and can use `run.app` while domain
+registration/TLS completes. Releases build unique immutable tags and deploy by
+digest. Existing services receive a tagged candidate without traffic; verification
+precedes promotion. Candidate failures preserve existing traffic. Post-promotion
+verification failure restores the previous revision. A first release has initial
+traffic before verification because there is no prior revision; inspect logs and
+release a correction on failure. Use `--image=REPOSITORY/backend@sha256:DIGEST` to
+reuse a previously pushed image from this repository.
+
+## Domain and TLS
+
+After bootstrap enables Cloud Domains, check live availability and annual price:
+
+```bash
+gcloud domains registrations get-register-parameters YOUR_DOMAIN --project=home-safety-ai
+```
+
+Confirm the exact domain and price with the owner before registering. Registration
+stays outside Terraform state. Supply registrant contact details privately and
+complete contact verification/terms acceptance; do not commit personal information.
+Cloud Domains defaults to annual automatic renewal, managed independently of
+infrastructure teardown.
+
+Set `domain_name = "YOUR_DOMAIN"` in private Terraform tfvars, then plan/apply through
+the wrapper. Empty is the bootstrap default. Enabling it creates the Cloud DNS zone,
+API A record, reserved IP, global load balancer and managed certificate. Read
+`python3 scripts/terraform-gcp.py output domain_name_servers` and use those Cloud
+DNS name servers for Cloud Domains registration/delegation. The zone can be created
+before registration to obtain these values. Wait for DNS propagation and managed
+certificate ACTIVE status, then run `deploy-gcp.py verify` with the backend Python.
+
+The hostname survives Cloud Run recreation while DNS/load-balancer resources remain.
+Destroy may remove the zone, record, IP, load balancer and certificate. Recreating
+an IP reservation can allocate a different address; restore the A record to the
+current IP, and update Cloud Domains delegation if recreated name servers differ.
+Domain registration and the demo-token secret remain outside this lifecycle.
+
+## Durable highlights
+
+After the initial backend and custom hostname work, set private tfvars:
+
+```hcl
+annotation_worker_url = "https://api.YOUR_DOMAIN"
+demo_token_initialized = true
+```
+
+Apply the recovery configuration before enabling segmentation:
+
+```bash
+python3 scripts/terraform-gcp.py plan -out=highlights.tfplan
+python3 scripts/terraform-gcp.py apply highlights.tfplan
+backend/.venv/bin/python scripts/deploy-gcp.py release --provider muse --model YOUR_MUSE_MAIN_MODEL --segmentation-model sam-3.1
+```
+
+The authenticated once-per-minute Scheduler sweep recovers persisted dispatch intent.
+Cloud Tasks uses Google OIDC to deliver independent finding attempts. The shared demo
+token cannot invoke internal worker routes. Firestore fences started attempts;
+expiry fails an attempt and only explicit user retry starts new model work. Queue
+concurrency 24 and Cloud Run concurrency 8 with 2 instances admit 12 overlapping
+attempts; cold starts/load may queue work (ADRs 0002/0003). Terraform supplies the
+queue, stable worker URL and service-account identity to the release workflow.
+
+## Connect Expo Go
+
+```bash
+backend/.venv/bin/python scripts/deploy-gcp.py phone-env
+source scripts/frontend-env.sh
+cd mobile
+npm run start:tunnel -- --go --clear
+```
+
+`phone-env` verifies the custom endpoint, then privately updates root `.env` with
+`EXPO_PUBLIC_DATA_SOURCE=api`, `EXPO_PUBLIC_API_URL=https://api.<domain>` and
+`EXPO_PUBLIC_DEMO_TOKEN` matching the serving revision's pinned token. It also aligns
+`DEMO_BEARER_TOKEN` for local use, retaining other settings. Model keys stay backend-only.
+All npm Expo launch commands load only root `EXPO_PUBLIC_` entries. Inherited process
+variables take precedence; `mobile/.env` is unnecessary and ignored. Restart Expo
+after changes. Scan the QR code using Android Expo Go compatible with SDK 57.
+Keep the development computer/tunnel running for repeated phone tests.
+
+Explore assessments, text/photo follow-ups, user reviews, highlights, checklist
+updates, restart persistence and deletion. Model requests consume quota; these
+journeys are not deployment gates. Record observations in `docs/demo.md` without
+claiming detection accuracy from a small demo set.
+
+## Verification and operations
+
+```bash
+backend/.venv/bin/python scripts/deploy-gcp.py status
+backend/.venv/bin/python scripts/deploy-gcp.py verify
+backend/.venv/bin/python scripts/deploy-gcp.py rollback PREVIOUS_REVISION
+```
+
+The verifier rejects missing/invalid tokens, checks authenticated health and disabled
+docs, then creates/reads/retrieves/scopes/deletes a tiny Firestore/GCS assessment/photo
+fixture without a model request. Another device cannot read the assessment or photo.
+Cleanup runs on failure; if cleanup fails, fixture identifiers allow explicit deletion
+after fixing storage access. With a configured domain, verification checks both
+`run.app` and custom HTTPS: public DNS and the Cloud DNS A record must match the
+reserved IP, the managed certificate must be ACTIVE and TLS must validate. Pending
+DNS/TLS fails readiness explicitly.
+
+Rollback verifies the target with its original pinned token version before restoring
+traffic; it does not roll back data. Run one release/rollback at a time and retain
+needed revisions/images/versions. Scale-to-zero retains data/photos. Registry,
+storage, secrets, DNS, reserved IP and load balancing can incur ongoing charges.
+No automatic teardown or hard spending cap is configured.
+
+## Explicit teardown
+
+Only when the owner intends to remove persistent test data:
+
+```bash
+python3 scripts/terraform-gcp.py destroy
+```
+
+The wrapper warns about assessment/photo deletion, creates/displays a destroy plan,
+requires typing `destroy`, invokes `deploy-gcp.py delete-service` first and applies
+the plan only after successful service removal. No current image is required.
+Firestore deletion protection is disabled and bucket destruction includes objects.
+Domain registration and the external demo-token secret remain.
+
+## Local checks
+
+```bash
+backend/.venv/bin/python -m pytest backend/tests -m 'not live' -q
+backend/.venv/bin/ruff check --config backend/pyproject.toml backend scripts
+python3 scripts/terraform-gcp.py fmt -check
+python3 scripts/terraform-gcp.py validate
+source scripts/frontend-env.sh
+npm --prefix mobile run typecheck
+npm --prefix mobile test
+```
+
+Sources: [Google serverless load balancing](https://docs.cloud.google.com/load-balancing/docs/https/setup-global-ext-https-serverless),
+[Cloud Domains registration](https://docs.cloud.google.com/domains/docs/register-domain),
+[Expo environment variables](https://docs.expo.dev/guides/environment-variables/).
