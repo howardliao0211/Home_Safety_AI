@@ -165,9 +165,9 @@ a no-hazards result.
 - `docs/agents/`: engineering skill configuration; `docs/adr/`: settled decisions
   that warrant an architecture decision record.
 - `.scratch/<feature>/`: local specs and individual implementation tickets.
-- The mobile preview uses simulated assessments and local state. The FastAPI
-  backend implements assessment workflows with a Groq development adapter and
-  Firestore/GCS storage; mobile API integration is separate work. Local setup and
+- The mobile app connects to FastAPI by default; explicit preview mode uses
+  simulated assessments and separate local state. The FastAPI backend implements
+  assessment workflows with a Groq development adapter and Firestore/GCS storage. Local setup and
   the HTTP contract are documented in `backend/README.md`.
   Shared GCP resources live in `deploy/terraform/`; `scripts/deploy-gcp.py` owns
   image releases, Cloud Run revisions/traffic, verification and rollback.

@@ -3,8 +3,8 @@
 FastAPI implements photo assessments, focused follow-ups, user-requested photo
 reviews, finding status/checklist actions, latest-assessment retrieval, retained
 evidence, and retryable deletion. Groq is the development model provider. The
-Expo frontend currently uses its preview service; connecting its state and API
-client to this backend is separate work.
+Expo frontend connects to this API by default; explicit preview mode remains
+available without a backend.
 
 ## Start locally
 
@@ -76,8 +76,15 @@ to every read, write, photo download, and deletion; it is not authenticated
 identity. If `DEMO_BEARER_TOKEN` is configured, send `Authorization: Bearer <token>`
 on every API request, including health checks. OpenAPI docs contain no secrets.
 
-Responses use snake_case fields. The mobile preview currently uses camelCase;
-its future API client needs an explicit mapping and server-owned state handling.
+Responses use snake_case fields. The mobile API client maps these to its
+camelCase domain model and uses the server's saved assessment state.
+
+For local Expo web, CORS allows `http://localhost:8081` and
+`http://127.0.0.1:8081` by default. To use another browser origin, set
+`CORS_ORIGINS` to a JSON array of exact origins in the backend environment.
+Production has no default allowed origins. Native Android requests do not need
+browser CORS. See the [frontend guide](../docs/frontend-development.md) for API
+URL, token, and physical-device networking configuration.
 
 | Method and path | Input / behavior |
 | --- | --- |

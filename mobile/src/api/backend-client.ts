@@ -175,10 +175,17 @@ export class BackendClient {
       const dto: RemoteAssessment = await (
         await this.request("/v1/assessments/latest")
       ).json();
-      return fromServer(
-        dto,
-        cached.find((a) => a.id === dto.id),
-      );
+      const previous = cached.find((a) => a.id === dto.id);
+      const restored = fromServer(dto, previous);
+      // A ready server record may be a retained failed upload, or an analysis
+      // interrupted before it started. Restoring it must not trigger a model call.
+      if (restored.status === "ready") {
+        restored.status = "failed";
+        restored.error =
+          previous?.error ||
+          "This assessment has unfinished analysis. Your input is saved. Retry when ready.";
+      }
+      return restored;
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) return null;
       throw error;

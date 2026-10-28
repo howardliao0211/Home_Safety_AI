@@ -4,10 +4,10 @@ A mobile-first home-safety assistant that turns room photos into findings and
 an actionable checklist for households with older adults, children, babies,
 and pets.
 
-The current frontend is an interactive Expo / React Native preview. Results
-are predefined examples; the selected photo is **not analysed**. You can develop
-and review the complete flow without a backend, Muse credentials, or an `.env`
-file.
+The Expo / React Native frontend connects to the local FastAPI backend by
+default. Submitted photos are analysed using the backend's configured model
+provider (Groq for development). An explicit preview mode uses predefined
+examples and works without a backend or credentials.
 
 ## Development environment
 
@@ -65,7 +65,22 @@ they should point to Linux executables, rather than Windows paths under `/mnt/c/
 
 ## Run the frontend
 
-Run these commands from `mobile/`.
+First start the storage emulators and API using the
+[backend guide](backend/README.md#start-locally). In another terminal, configure
+the frontend from the repository root:
+
+```bash
+source scripts/frontend-env.sh
+cd mobile
+cp .env.example .env
+```
+
+The default API URL is `http://127.0.0.1:8000`. If the backend has
+`DEMO_BEARER_TOKEN` configured, set the matching `EXPO_PUBLIC_DEMO_TOKEN` in
+`mobile/.env`. This shared demo token is client-visible; never put model API
+keys in the frontend. Restart Expo after changing its environment.
+
+Run the following commands from `mobile/`.
 
 ### Browser
 
@@ -77,8 +92,17 @@ Open the localhost URL printed by Expo, usually `http://localhost:8081`.
 Saved code changes refresh the preview. Stop the server with **Ctrl+C**.
 
 Choose **Start with a room**, select a photo or bundled sample, choose optional
-household profiles, and create a sample assessment. Use **Preview** in the
-development header to select scenarios for fresh demos or reset local data.
+household profiles, and create an assessment. Failed analysis retains the input
+and offers an explicit Retry action.
+
+For fixture-only demos without the API, run:
+
+```bash
+EXPO_PUBLIC_DATA_SOURCE=preview npm run web
+```
+
+In preview mode only, **Preview** in the development header selects scenarios
+or resets local preview data. The selected photo is not analysed in this mode.
 
 ### Android phone
 
@@ -86,6 +110,9 @@ development header to select scenarios for fresh demos or reset local data.
 npm start
 ```
 
+Set `EXPO_PUBLIC_API_URL` to the development machine's reachable LAN address
+with port 8000 and bind Uvicorn to `0.0.0.0`. For an Android emulator, use
+`http://10.0.2.2:8000`. A phone's `localhost` refers to the phone itself.
 Connect the phone and development machine to the same network, then scan the
 terminal's QR code with Expo Go. If WSL networking or a firewall prevents the
 phone from reaching the LAN address, use the installed tunnel support:
@@ -95,7 +122,8 @@ npm run start:tunnel
 ```
 
 Tunneling requires internet access and exposes the development server through
-a temporary public URL. Stop the server when finished.
+a temporary public URL. It tunnels Expo only; the phone still needs a reachable
+API URL. Stop the server when finished.
 
 For an emulator, first configure Android Studio, the Android SDK, and `adb`,
 start an emulator, then run `npm run android`.
@@ -114,10 +142,14 @@ Install the test browser once, then run the browser journeys:
 ```bash
 npx playwright install chromium
 npm run test:e2e
+# Requires backend dependencies and running storage emulators; no model calls:
+npm run test:e2e:api
 ```
 
-The browser runner starts or reuses an Expo server on port 8081. Screenshots
-and test artifacts are written to the ignored `.tools/` directory.
+The preview browser runner starts its own Expo server on port 8083. The API
+suite starts a deterministic model fixture on 8001 and Expo on 8082, using real
+storage emulators on 8080 and 4443. Screenshots and test artifacts are written
+to the ignored `.tools/` directory. Neither suite calls Groq.
 
 Check Expo compatibility and build both targets without an Android SDK:
 
@@ -136,16 +168,17 @@ Use `npm run format` to format the frontend source and tests.
 | `mobile/app/` | Expo Router pages and navigation |
 | `mobile/src/components/` | Shared UI and design tokens |
 | `mobile/src/domain/` | Assessment, finding, and checklist state |
-| `mobile/src/api/` | Simulated service, ready for later backend integration |
+| `mobile/src/api/` | FastAPI client, photo uploads, and explicit preview service |
 | `mobile/src/hooks/` | Shared frontend state and actions |
 | `mobile/src/storage/` | Local persistence and photo retention |
 | `mobile/tests/` | State tests and browser journeys |
 | `backend/` | FastAPI assessment backend, Groq adapter, Firestore/GCS storage and tests |
 | `deploy/terraform/` | Shared Cloud Run infrastructure, storage, registry and secret IAM |
 
-Preview data stays in IndexedDB in the browser, or AsyncStorage and app-owned
-photo files on Android. Reloads retain assessments and checklist actions.
-Confirmed deletion removes the selected assessment and its associated photos.
+API mode retains assessment state and photos through the backend, scoped by a
+persistent device ID. Preview data stays on the device. Each mode uses separate
+local state; reloads retain assessments and checklist actions. Confirmed deletion
+removes the selected assessment and its associated photos.
 
 See the [frontend development guide](docs/frontend-development.md) for more
 detail, [demo notes](docs/demo.md) for verified behavior and pending device
@@ -154,7 +187,7 @@ backend architecture.
 
 See the [backend development guide](backend/README.md) to run the real Groq-backed
 API locally, inspect its endpoints, and prepare the future Muse integration.
-The mobile preview continues to use its simulated service.
+The frontend uses this API by default; preview mode remains available explicitly.
 
 See the [Cloud Run deployment guide](deploy/README.md) for the production Docker
 image, separate Terraform provisioning, Secret Manager setup, verified releases

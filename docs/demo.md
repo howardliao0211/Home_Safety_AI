@@ -1,5 +1,8 @@
 # Frontend preview checks
 
+For the current connected API setup, see the verification entry at the end of
+this document. Earlier sections record checks of the implementation at that time.
+
 Implemented against `.scratch/frontend-preview/spec.md` on 2026-10-27.
 This is a frontend demonstration with predefined results. No Muse analysis,
 model accuracy evaluation, backend, or cloud persistence was exercised.
@@ -113,7 +116,7 @@ Use `npm run format` to format frontend source and tests.
 
 The FastAPI backend now implements the assessment, linked follow-up/review,
 finding-status, retained-photo, latest-assessment, and deletion workflows.
-Grok (xAI) is the explicitly selected development provider; Muse awaits its actual
+Groq is the explicitly selected development provider; Muse awaits its actual
 API contract. Setup and the HTTP contract are in [backend/README.md](../backend/README.md).
 
 Verified:
@@ -182,3 +185,33 @@ Verified locally:
 No GCP provisioning, image push, Secret Manager update or Cloud Run deployment
 was performed. Actual cloud IAM, candidate URLs, public invocation and revision
 traffic changes still require a provisioned service and live release check.
+
+## Local frontend/API continuation — 2026-10-28
+
+The frontend now defaults to the FastAPI client; fixture-only previews require
+`EXPO_PUBLIC_DATA_SOURCE=preview`. Setup instructions, device networking, bearer
+token configuration, and test ports are documented in the root README and
+[frontend guide](frontend-development.md). Model credentials stay backend-only.
+
+Verified in this checkout:
+
+- TypeScript checking and all 12 frontend unit tests passed.
+- All 14 preview Chromium journeys passed.
+- 45 backend tests passed; three opt-in emulator/restart/live tests were skipped.
+  Ruff lint and formatting checks passed.
+- Chromium libraries are available; no project-local browser library workaround
+  is required in this environment.
+
+The connected browser suite was attempted but its API fixture could not start:
+the GCS emulator at `127.0.0.1:4443` refused connections. Docker Desktop's WSL
+integration is unavailable, neither storage emulator is running, and this
+checkout has no root `.env`. Connected browser journeys and the actual
+browser → FastAPI → Groq path remain unverified in this continuation. No live
+model request or cloud deployment was performed. Restore backend credentials
+locally without sharing them, enable Docker's WSL integration, start the storage
+emulators, and run `npm run test:e2e:api` before the separate live-model check.
+
+Review identified and corrected a restoration edge: a retained server assessment
+with `status=ready` now requires explicit Retry after reconnecting. Reloading a
+failed upload must not automatically retry that upload or start model analysis.
+Physical Android networking and camera checks remain pending.
