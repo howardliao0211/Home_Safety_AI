@@ -44,6 +44,9 @@ class MemoryRepository:
                 self.records[key] = Assessment.model_validate_json(updated.model_dump_json())
             return copy.deepcopy(updated)
 
+    def annotation_pending(self):
+        return [copy.deepcopy(a) for a in self.records.values() if a.annotation_dispatch_pending]
+
     def close(self):
         pass
 
@@ -54,13 +57,16 @@ class MemoryPhotos:
         self.fail_delete = False
         self.fail_upload = False
 
-    def put(self, device_id, assessment_id, photo, data):
+    def put(self, device_id, assessment_id, photo, data, *, timeout=20):
         if self.fail_upload:
             raise OSError("test upload failure")
         self.objects[(device_id, assessment_id, photo.id)] = data
 
-    def get(self, device_id, assessment_id, photo):
+    def get(self, device_id, assessment_id, photo, *, timeout=20):
         return self.objects[(device_id, assessment_id, photo.id)]
+
+    def delete(self, device_id, assessment_id, photo):
+        self.objects.pop((device_id, assessment_id, photo.id), None)
 
     def delete_assessment(self, device_id, assessment_id):
         for key in list(self.objects):
@@ -68,6 +74,13 @@ class MemoryPhotos:
                 del self.objects[key]
                 if self.fail_delete:
                     raise OSError("test partial deletion")
+
+    def annotation_assets(self):
+        return [
+            (device, aid, key.removeprefix("annotation-"))
+            for device, aid, key in list(self.objects)
+            if key.startswith("annotation-")
+        ]
 
     def close(self):
         pass

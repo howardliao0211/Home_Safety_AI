@@ -294,7 +294,9 @@ class AssessmentService:
                 submission = submission_in(finding, submission_id)
                 context.update(
                     {
-                        "finding": finding.model_dump(mode="json", exclude={"submissions"}),
+                        "finding": finding.model_dump(
+                            mode="json", exclude={"submissions", "evidence_history"}
+                        ),
                         "earlier_completed_submissions": [
                             {"text": s.text, "feedback": s.feedback, "kind": s.kind}
                             for s in finding.submissions
@@ -319,10 +321,15 @@ class AssessmentService:
 
             def complete(current):
                 current_operation = target(current)
+                if submission_id:
+                    from app.annotations.service import snapshot
+
+                    snapshot(current, finding_in(current, finding_id))
                 current_operation.status = "complete"
                 current_operation.error = None
                 if submission_id:
                     current_finding = finding_in(current, finding_id)
+                    current_finding.content_revision = new_id()
                     for key, value in result.finding.model_dump().items():
                         setattr(current_finding, key, value)
                     current_operation.feedback = result.feedback
@@ -418,6 +425,12 @@ class AssessmentService:
                 return None
             idle(previous)
             previous.deleting = True
+            previous.annotation_dispatch_pending = False
+            for annotation in previous.annotations:
+                if annotation.state in {"queued", "processing"}:
+                    annotation.state = "failed"
+                    annotation.reason = "Assessment deletion cancelled this highlight."
+                    annotation.finished_at = now()
             previous.lease = lease
             return previous
 

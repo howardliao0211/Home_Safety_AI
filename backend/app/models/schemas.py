@@ -87,12 +87,69 @@ class FollowUp(FollowUpSuggestion):
     state: Literal["available", "skipped", "answered"] = "available"
 
 
+AnnotationState = Literal["queued", "processing", "ready", "unavailable", "failed", "reported"]
+
+
+class Region(StrictModel):
+    x: float = Field(ge=0, le=1, allow_inf_nan=False)
+    y: float = Field(ge=0, le=1, allow_inf_nan=False)
+    width: float = Field(gt=0, le=1, allow_inf_nan=False)
+    height: float = Field(gt=0, le=1, allow_inf_nan=False)
+
+
+class Annotation(StrictModel):
+    id: str = Field(default_factory=new_id)
+    finding_id: str
+    revision: str
+    attempt: int
+    state: AnnotationState = "queued"
+    reason: str | None = None
+    created_at: datetime = Field(default_factory=now)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    photo_id: str | None = None
+    photo_kind: Literal["original", "follow-up", "review"] | None = None
+    image_digest: str | None = None
+    width: int | None = None
+    height: int | None = None
+    orientation: Literal[1] = 1  # Uploads are EXIF-transposed before storage.
+    target: str | None = None
+    region: Region | None = None
+    review: Literal["approved", "rejected"] | None = None
+    feedback: Literal["wrong_object"] | None = None
+    # Internal fields never cross the client API.
+    lease_id: str | None = None
+    expires_at: datetime | None = None
+    mask: Photo | None = None
+    request_id: str
+    dispatch_pending: bool = True
+
+
+class EvidenceSnapshot(StrictModel):
+    revision: str
+    content: FindingContent
+    photo_ids: list[str]
+    submission_ids: list[str]
+    created_at: datetime = Field(default_factory=now)
+
+
+class AnnotationRequest(StrictModel):
+    revision: str = Field(min_length=1, max_length=100)
+    retry: bool = False
+
+
+class FeedbackRequest(StrictModel):
+    kind: Literal["wrong_object"]
+
+
 class Finding(FindingContent):
     id: str = Field(default_factory=new_id)
     status: FindingStatus = "open"
     note: str = ""
     follow_up: FollowUp | None = None
     submissions: list[Submission] = Field(default_factory=list)
+    content_revision: str = "initial"
+    evidence_history: list[EvidenceSnapshot] = Field(default_factory=list)
 
 
 class Lease(StrictModel):
@@ -114,6 +171,8 @@ class Assessment(Operation):
     disclaimer: str = DISCLAIMER
     deleting: bool = False
     lease: Lease | None = None
+    annotations: list[Annotation] = Field(default_factory=list)
+    annotation_dispatch_pending: bool = False
 
 
 class FindingPatch(StrictModel):

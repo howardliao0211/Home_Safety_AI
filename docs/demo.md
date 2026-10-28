@@ -249,3 +249,34 @@ disabled textarea.
 
 No cloud release or infrastructure changes were made. Cloud release tooling
 still configures Groq and needs separate Muse configuration before deployment.
+
+## On-demand object highlights — 2026-10-28
+
+Automated deterministic checks cover queued/ready/reported states, hide/show,
+reload, explicit retry, interactive checklist controls while queued, and identical
+photo/mask canvas bounds after zoom. The assessment overview makes no highlight
+request. Worker checks cover mandatory review, rejection, invalid geometry,
+timeout, FIFO claims, duplicate delivery, stale revision and deletion races,
+wrong-object feedback, device scoping, failed enqueue recovery, and a documented
+SAM token/raster fixture. Firestore/GCS checks cover API restart with queued work,
+independent local worker discovery, persisted mask retrieval, deletion and orphan
+asset recovery. These checks verify integration behavior, not detection accuracy.
+
+Manual device/provider cases still to run:
+
+- Portrait, landscape and EXIF-rotated camera photos; zoom/pan and hide highlights
+  on physical Android. Verify a full photo without cropping and precise contour
+  alignment at all zoom levels and after device rotation.
+- Repeated similar objects: confirm the action-relevant instance alone survives
+  localisation review. Curtains near a heater should highlight the curtains when
+  the action concerns them. Uncertain anchoring should remain uncertainty.
+- Follow-up/review photo selection: verify the evidence-photo label changes and an
+  earlier photo remains eligible for a text-only answer. Compare an older
+  revision's own evidence/photo with the current finding.
+- Provider no-match, rejected/malformed review, missing legacy photo, interruption,
+  deadline expiry and reconnect: findings remain usable and retries stay manual.
+- Cloud Tasks and Scheduler deployment smoke checks described in `deploy/README.md`.
+
+Live MUSE segmentation quality and physical Android gestures have not been
+validated by these deterministic fixtures. An approved contour is localisation
+assistance only and must never be described as a professional safety verification.

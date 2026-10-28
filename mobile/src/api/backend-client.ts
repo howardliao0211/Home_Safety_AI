@@ -1,4 +1,5 @@
 import type {
+  Annotation,
   Assessment,
   Finding,
   FindingStatus,
@@ -24,6 +25,8 @@ type RemoteFinding = Omit<
   Finding,
   "shortAction" | "followUp" | "submissions"
 > & {
+  content_revision?: string;
+  evidence_history?: Finding["evidenceHistory"];
   short_action: string;
   follow_up: Finding["followUp"] | null;
   submissions: RemoteSubmission[];
@@ -70,6 +73,10 @@ export function fromServer(
       const old = cached?.findings.find((f) => f.id === item.id);
       return {
         id: item.id,
+        contentRevision: item.content_revision || "initial",
+        annotation: item.annotation,
+        annotations: item.annotations || [],
+        evidenceHistory: item.evidence_history || [],
         title: item.title,
         category: item.category,
         severity: item.severity,
@@ -269,10 +276,65 @@ export class BackendClient {
   async delete(id: string) {
     await this.request(`/v1/assessments/${id}`, { method: "DELETE" });
   }
+  async requestAnnotation(
+    assessmentId: string,
+    findingId: string,
+    revision: string,
+    retry = false,
+  ): Promise<Annotation> {
+    return (
+      await this.request(
+        `/v1/assessments/${assessmentId}/findings/${findingId}/annotations`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ revision, retry }),
+        },
+      )
+    ).json();
+  }
+  async annotation(
+    assessmentId: string,
+    findingId: string,
+    id: string,
+  ): Promise<Annotation> {
+    return (
+      await this.request(
+        `/v1/assessments/${assessmentId}/findings/${findingId}/annotations/${id}`,
+      )
+    ).json();
+  }
+  async reportAnnotation(
+    assessmentId: string,
+    findingId: string,
+    id: string,
+  ): Promise<Annotation> {
+    return (
+      await this.request(
+        `/v1/assessments/${assessmentId}/findings/${findingId}/annotations/${id}/feedback`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind: "wrong_object" }),
+        },
+      )
+    ).json();
+  }
+  async maskDataUrl(assessmentId: string, findingId: string, id: string) {
+    return this.dataUrl(
+      await this.request(
+        `/v1/assessments/${assessmentId}/findings/${findingId}/annotations/${id}/mask`,
+      ),
+      "image/png",
+    );
+  }
   async photoDataUrl(photo: NonNullable<Photo["remote"]>) {
     const response = await this.request(
       `/v1/assessments/${photo.assessmentId}/photos/${photo.photoId}`,
     );
+    return this.dataUrl(response, "image/jpeg");
+  }
+  private async dataUrl(response: Response, contentType: string) {
     const bytes = new Uint8Array(await response.arrayBuffer());
     const alphabet =
       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -286,6 +348,6 @@ export class BackendClient {
         (i + 1 < bytes.length ? alphabet[(n >>> 6) & 63] : "=") +
         (i + 2 < bytes.length ? alphabet[n & 63] : "=");
     }
-    return `data:image/jpeg;base64,${encoded}`;
+    return `data:${contentType};base64,${encoded}`;
   }
 }

@@ -64,6 +64,10 @@ export type Submission = {
   frozen?: boolean;
 };
 export type Finding = {
+  contentRevision?: string;
+  annotation?: Annotation | null;
+  annotations?: Annotation[];
+  evidenceHistory?: EvidenceSnapshot[];
   id: string;
   title: string;
   category: string;
@@ -206,3 +210,28 @@ export function completeSubmission(
     ),
   };
 }
+
+export type Annotation = {
+  id?: string;
+  revision?: string;
+  state:
+    "queued" | "processing" | "ready" | "unavailable" | "failed" | "reported";
+  reason?: string | null;
+  supported?: boolean;
+  photo_id?: string | null;
+  photo_kind?: "original" | "follow-up" | "review" | null;
+  width?: number | null;
+  height?: number | null;
+  orientation?: 1;
+  target?: string | null;
+};
+export type EvidenceSnapshot = {
+  revision: string;
+  content: {
+    title: string;
+    evidence: string;
+    recommendation: string;
+    uncertainty: string;
+  };
+  photo_ids: string[];
+};

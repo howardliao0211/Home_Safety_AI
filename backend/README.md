@@ -220,3 +220,49 @@ non-root user. Production disables `/docs`, `/redoc` and `/openapi.json`.
 Build locally with `docker build -t home-safety-backend:dev backend` from the repo
 root. See [deploy/README.md](../deploy/README.md) for separate Terraform provisioning,
 Secret Manager initialization, Cloud Run release verification and rollback.
+
+## On-demand finding highlights
+
+Highlighting is separate from safety analysis. Configure `MODEL_PROVIDER=muse`,
+`MUSE_MAIN_MODEL`, backend-only `MUSE_API_KEY`, and `MUSE_SEGMENTATION_MODEL`.
+Missing segmentation configuration or another provider returns an explicit
+unsupported capability without creating an attempt. SAM uses its own streaming
+token/mask parser (`meta-sam-parser`), followed by mandatory main-model review.
+
+With the existing Firestore/GCS emulators and API running, start an independent
+worker from `backend/`:
+
+```sh
+.venv/bin/python -m app.annotations.local_worker
+```
+
+This worker discovers persisted work itself. Navigating away, stopping polling,
+or restarting the API does not own or cancel it. Stopping the worker mid-attempt
+leaves an expired, manually retryable failure; restarting never repeats that
+attempt's model calls. A queued job retains its place. One job processes per
+assessment, with a 30-second claim budget excluding queue waiting time.
+
+Finding JSON adds `content_revision`, `evidence_history`, `annotation` (current
+revision), and `annotations` (attempt metadata). Existing findings start at
+`initial`, with evidence snapshots captured lazily. These routes use the normal
+bearer token and `X-Device-ID`:
+
+- `POST .../findings/{finding_id}/annotations`: JSON `{ "revision": "initial", "retry": false }`.
+  Returns `202` with the persisted ID for active work, `200` for terminal/capability
+  responses, or `409` for a stale revision. `retry: true` creates a new attempt only
+  after a terminal result. Repeated taps reuse active work.
+- `GET .../annotations/{id}` returns metadata, without masks, leases or private keys.
+- `GET .../annotations/{id}/mask` returns the authorized, source-sized transparent
+  PNG overlay with translucent fill and outline; available only for reviewed,
+  unreported results. The metadata binds it to the exact photo digest, upright
+  orientation (`1`), width and height. Regions use top-left normalized coordinates.
+- `POST .../annotations/{id}/feedback` accepts `{ "kind": "wrong_object" }` and
+  persistently hides the annotation without modifying finding/checklist state.
+
+The finding screen requests/reuses work on focus, polls active jobs only while
+focused, and resumes on app activation. The overview never requests highlights.
+Historical revisions keep their own content, annotation metadata and source photos.
+Mask assets and metadata are deleted with their assessment. Dispatch recovery also
+sweeps orphan masks; private keys and image/mask payloads never enter diagnostics.
+`/internal/annotations/work` and `/internal/annotations/recover` require verified
+Google OIDC tokens from the configured service identity, not a client demo token.

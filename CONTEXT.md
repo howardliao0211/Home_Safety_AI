@@ -170,3 +170,15 @@ a no-hazards result.
   Shared GCP resources live in `deploy/terraform/`; `scripts/deploy-gcp.py` owns
   image releases, Cloud Run revisions/traffic, verification and rollback.
   Provisioning and releases are separate; see `deploy/README.md`.
+
+**Finding-content revision**: A saved version of a finding's explanation and
+supporting evidence, separate from its checklist status. Successful follow-up or
+review analysis creates a new revision; status changes and failed analysis do not.
+
+**Highlight** (annotation): An optional, reviewed localisation of one main visible
+object in one supporting photo for a finding-content revision. It helps locate
+evidence and does not verify safety, anchoring, or resolution.
+
+**Highlight attempt**: A single requested selection, segmentation, and localisation
+review, with a persisted outcome. Retrying is an explicit user action; reporting
+an incorrect object hides that result without changing the finding's status.

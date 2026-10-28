@@ -45,9 +45,15 @@ def prepare_photo(data: bytes) -> tuple[Photo, bytes]:
 
 
 class PhotoStore(Protocol):
-    def put(self, device_id: str, assessment_id: str, photo: Photo, data: bytes) -> None: ...
-    def get(self, device_id: str, assessment_id: str, photo: Photo) -> bytes: ...
+    def put(
+        self, device_id: str, assessment_id: str, photo: Photo, data: bytes, *, timeout: float = 20
+    ) -> None: ...
+    def get(
+        self, device_id: str, assessment_id: str, photo: Photo, *, timeout: float = 20
+    ) -> bytes: ...
+    def delete(self, device_id: str, assessment_id: str, photo: Photo) -> None: ...
     def delete_assessment(self, device_id: str, assessment_id: str) -> None: ...
+    def annotation_assets(self): ...
     def close(self) -> None: ...
 
 
@@ -77,13 +83,25 @@ class GCSPhotoStore:
     def blob(self, device_id: str, assessment_id: str, photo: Photo):
         return self.bucket.blob(self.prefix(device_id, assessment_id) + photo.id)
 
-    def put(self, device_id: str, assessment_id: str, photo: Photo, data: bytes):
+    def put(
+        self, device_id: str, assessment_id: str, photo: Photo, data: bytes, *, timeout: float = 20
+    ):
         self.blob(device_id, assessment_id, photo).upload_from_string(
-            data, content_type=photo.content_type, timeout=20, retry=None
+            data, content_type=photo.content_type, timeout=timeout, retry=None
         )
 
-    def get(self, device_id: str, assessment_id: str, photo: Photo) -> bytes:
-        return self.blob(device_id, assessment_id, photo).download_as_bytes(timeout=20, retry=None)
+    def get(
+        self, device_id: str, assessment_id: str, photo: Photo, *, timeout: float = 20
+    ) -> bytes:
+        return self.blob(device_id, assessment_id, photo).download_as_bytes(
+            timeout=timeout, retry=None
+        )
+
+    def delete(self, device_id: str, assessment_id: str, photo: Photo):
+        try:
+            self.blob(device_id, assessment_id, photo).delete(timeout=10, retry=None)
+        except NotFound:
+            pass
 
     def delete_assessment(self, device_id: str, assessment_id: str):
         for blob in self.client.list_blobs(
@@ -93,6 +111,17 @@ class GCSPhotoStore:
                 blob.delete(timeout=20, retry=None)
             except NotFound:
                 pass
+
+    def annotation_assets(self):
+        for blob in self.client.list_blobs(self.bucket, prefix="devices/", timeout=10, retry=None):
+            parts = blob.name.split("/")
+            if (
+                len(parts) == 5
+                and parts[0] == "devices"
+                and parts[2] == "assessments"
+                and parts[4].startswith("annotation-")
+            ):
+                yield parts[1], parts[3], parts[4].removeprefix("annotation-")
 
     def close(self):
         self.client.close()

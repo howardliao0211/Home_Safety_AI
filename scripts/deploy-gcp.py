@@ -41,6 +41,9 @@ class Config:
     database_id: str
     groq_secret: str
     demo_secret: str
+    muse_secret: str = ""
+    annotation_tasks_queue: str = ""
+    annotation_worker_url: str = ""
 
 
 class Deployer:
@@ -130,15 +133,17 @@ class Deployer:
         )
         return name.rsplit("/", 1)[-1]
 
-    def publish_secrets(self, env_file, *, rotate_demo_token=False):
+    def publish_secrets(self, env_file, *, rotate_demo_token=False, provider="groq"):
         values = dotenv_values(env_file)
-        key = os.environ.get("GROQ_API_KEY", values.get("GROQ_API_KEY"))
+        key_name = "MUSE_API_KEY" if provider == "muse" else "GROQ_API_KEY"
+        secret_name = self.config.muse_secret if provider == "muse" else self.config.groq_secret
+        key = os.environ.get(key_name, values.get(key_name))
         if not key or not key.strip():
             raise DeploymentError(
-                "GROQ_API_KEY is missing from the environment or selected env file."
+                f"{key_name} is missing from the environment or selected env file."
             )
-        version = self.add_secret(self.config.groq_secret, key)
-        print(f"Groq key uploaded as secret version {version} (value omitted).")
+        version = self.add_secret(secret_name, key)
+        print(f"{provider} key uploaded as secret version {version} (value omitted).")
         demo_version = self.latest_version(self.config.demo_secret, required=False)
         if demo_version is None or rotate_demo_token:
             token = os.environ.get(
@@ -209,16 +214,18 @@ class Deployer:
                 return traffic["url"], traffic["revisionName"]
         raise DeploymentError("Cloud Run did not return the candidate revision URL.")
 
-    def release(self, *, model, image=None, tag=None):
+    def release(self, *, model, image=None, tag=None, provider="groq", segmentation_model=""):
         if not model or not re.fullmatch(r"[A-Za-z0-9._/-]+", model):
-            raise DeploymentError("Set GROQ_MODEL or pass --model with a valid model ID.")
+            raise DeploymentError("Pass --model with a valid model ID for the selected provider.")
         if image and not re.fullmatch(
             re.escape(self.config.repository) + r"/backend@sha256:[0-9a-f]{64}", image
         ):
             raise DeploymentError(
                 "--image must be a backend image digest from the provisioned repository."
             )
-        groq_version = self.latest_version(self.config.groq_secret)
+        model_secret = self.config.muse_secret if provider == "muse" else self.config.groq_secret
+        model_key = "MUSE_API_KEY" if provider == "muse" else "GROQ_API_KEY"
+        model_version = self.latest_version(model_secret)
         demo_version = self.latest_version(self.config.demo_secret)
         demo_token = self.secret_value(self.config.demo_secret, demo_version)
         previous = self.describe(missing_ok=True)
@@ -230,13 +237,30 @@ class Deployer:
         image = image or self.build_push(tag or release_id)
         environment = {
             "ENVIRONMENT": "production",
-            "MODEL_PROVIDER": "groq",
-            "GROQ_MODEL": model,
+            "MODEL_PROVIDER": provider,
+            ("MUSE_MAIN_MODEL" if provider == "muse" else "GROQ_MODEL"): model,
             "MODEL_TIMEOUT_SECONDS": "90",
             "GOOGLE_CLOUD_PROJECT": self.config.project_id,
             "FIRESTORE_DATABASE_ID": self.config.database_id,
             "PHOTOS_BUCKET": self.config.photos_bucket,
         }
+        if segmentation_model:
+            if provider != "muse" or not re.fullmatch(r"[A-Za-z0-9._/-]+", segmentation_model):
+                raise DeploymentError(
+                    "Segmentation requires MUSE and a valid segmentation model ID."
+                )
+            if not self.config.annotation_tasks_queue or not self.config.annotation_worker_url:
+                raise DeploymentError(
+                    "Set annotation_worker_url and apply Terraform to provision recovery before enabling highlighting."
+                )
+            environment.update(
+                {
+                    "MUSE_SEGMENTATION_MODEL": segmentation_model,
+                    "ANNOTATION_TASKS_QUEUE": self.config.annotation_tasks_queue,
+                    "ANNOTATION_WORKER_URL": self.config.annotation_worker_url,
+                    "ANNOTATION_WORKER_SERVICE_ACCOUNT": self.config.service_account,
+                }
+            )
         arguments = [
             "run",
             "deploy",
@@ -257,7 +281,7 @@ class Deployer:
             f"--tag={release_id}",
             "--set-env-vars=" + ",".join(f"{key}={value}" for key, value in environment.items()),
             (
-                f"--set-secrets=GROQ_API_KEY={self.config.groq_secret}:{groq_version},"
+                f"--set-secrets={model_key}={model_secret}:{model_version},"
                 f"DEMO_BEARER_TOKEN={self.config.demo_secret}:{demo_version}"
             ),
             "--format=json",
@@ -422,11 +446,14 @@ def main():
     build = sub.add_parser("build", help="Build a local image without cloud access")
     build.add_argument("--tag", default="home-safety-backend:dev")
     secret = sub.add_parser("secrets", help="Upload Groq key and initialize/reuse a demo token")
+    secret.add_argument("--provider", choices=["groq", "muse"], default="groq")
     secret.add_argument("--env-file", type=Path, default=ROOT / ".env")
     secret.add_argument("--rotate-demo-token", action="store_true")
     release = sub.add_parser(
         "release", help="Build/push and verify a candidate before routing traffic"
     )
+    release.add_argument("--provider", choices=["groq", "muse"], default="groq")
+    release.add_argument("--segmentation-model", default="")
     release.add_argument(
         "--model",
         default=os.environ.get("GROQ_MODEL") or dotenv_values(ROOT / ".env").get("GROQ_MODEL"),
@@ -459,9 +486,19 @@ def main():
             return 0
         deployer = Deployer(load_config(), args.account)
         if args.command == "secrets":
-            deployer.publish_secrets(args.env_file, rotate_demo_token=args.rotate_demo_token)
+            deployer.publish_secrets(
+                args.env_file,
+                rotate_demo_token=args.rotate_demo_token,
+                provider=args.provider,
+            )
         elif args.command == "release":
-            deployer.release(model=args.model, image=args.image, tag=args.tag)
+            deployer.release(
+                model=args.model,
+                image=args.image,
+                tag=args.tag,
+                provider=args.provider,
+                segmentation_model=args.segmentation_model,
+            )
         elif args.command == "verify":
             deployer.verify()
         elif args.command == "rollback":

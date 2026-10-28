@@ -6,9 +6,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, Header, Request, Response, UploadFile
 from pydantic import TypeAdapter, ValidationError
 
+from app.annotations.service import public_annotation
 from app.assessments.service import AssessmentService
 from app.errors import AppError
-from app.models.schemas import Assessment, FindingPatch, Profile
+from app.models.schemas import AnnotationRequest, Assessment, FeedbackRequest, FindingPatch, Profile
 from app.storage.photos import MAX_UPLOAD_BYTES, prepare_photo
 
 
@@ -36,8 +37,21 @@ Device = Annotated[str, Depends(device_id)]
 
 
 def public(assessment: Assessment) -> dict:
-    result = assessment.model_dump(mode="json", exclude={"lease", "input_hash", "device_id"})
+    result = assessment.model_dump(
+        mode="json",
+        exclude={"lease", "input_hash", "device_id", "annotations", "annotation_dispatch_pending"},
+    )
     for finding in result["findings"]:
+        jobs = [j for j in assessment.annotations if j.finding_id == finding["id"]]
+        finding["annotations"] = [public_annotation(j) for j in jobs]
+        finding["annotation"] = next(
+            (
+                public_annotation(j)
+                for j in reversed(jobs)
+                if j.revision == finding["content_revision"]
+            ),
+            None,
+        )
         for submission in finding["submissions"]:
             submission.pop("input_hash")
     return result
@@ -169,3 +183,61 @@ def get_photo(assessment_id: UUID, photo_id: UUID, svc: Service, device: Device)
 def delete_assessment(assessment_id: UUID, svc: Service, device: Device):
     svc.delete(device, str(assessment_id))
     return Response(status_code=204)
+
+
+ANNOTATIONS = "/v1/assessments/{assessment_id}/findings/{finding_id}/annotations"
+
+
+@router.post(ANNOTATIONS)
+def request_annotation(
+    assessment_id: UUID,
+    finding_id: UUID,
+    body: AnnotationRequest,
+    request: Request,
+    response: Response,
+    device: Device,
+):
+    result = request.app.state.annotations.request(
+        device, str(assessment_id), str(finding_id), body, request.state.request_id
+    )
+    response.status_code = 202 if result["state"] in {"queued", "processing"} else 200
+    return result
+
+
+@router.get(ANNOTATIONS + "/{annotation_id}")
+def get_annotation(
+    assessment_id: UUID, finding_id: UUID, annotation_id: UUID, request: Request, device: Device
+):
+    return public_annotation(
+        request.app.state.annotations.get(
+            device, str(assessment_id), str(finding_id), str(annotation_id)
+        )
+    )
+
+
+@router.get(ANNOTATIONS + "/{annotation_id}/mask")
+def get_mask(
+    assessment_id: UUID, finding_id: UUID, annotation_id: UUID, request: Request, device: Device
+):
+    data = request.app.state.annotations.mask(
+        device, str(assessment_id), str(finding_id), str(annotation_id)
+    )
+    return Response(
+        data,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.post(ANNOTATIONS + "/{annotation_id}/feedback")
+def report_annotation(
+    assessment_id: UUID,
+    finding_id: UUID,
+    annotation_id: UUID,
+    body: FeedbackRequest,
+    request: Request,
+    device: Device,
+):
+    return request.app.state.annotations.feedback(
+        device, str(assessment_id), str(finding_id), str(annotation_id)
+    )

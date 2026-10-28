@@ -475,6 +475,11 @@ function usePreviewState() {
           }));
         }
       }),
+    annotationClient: backend,
+    refreshAssessment: async (id: string) => {
+      const current = assessmentById(id);
+      await saveServer(await (await backend()).get(current));
+    },
     deleteAssessment: (id: string) =>
       act(async () => {
         if (apiEnabled) await (await backend()).delete(id);

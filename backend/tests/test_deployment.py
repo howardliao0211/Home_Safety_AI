@@ -213,3 +213,30 @@ def test_container_entrypoint_honors_port(monkeypatch):
     monkeypatch.setattr(serve.uvicorn, "run", lambda *args, **kwargs: calls.append(kwargs))
     serve.main()
     assert calls[0]["host"] == "0.0.0.0" and calls[0]["port"] == 8095
+
+
+def test_muse_release_pins_key_and_wires_durable_highlighting(config):
+    from dataclasses import replace
+
+    configured = replace(
+        config,
+        muse_secret="muse-secret",
+        annotation_tasks_queue="projects/test-project/locations/us-central1/queues/highlights",
+        annotation_worker_url="https://test.run.app",
+    )
+    release = FakeRelease(configured)
+    release.release(
+        model="muse-main",
+        provider="muse",
+        segmentation_model="sam-3.1",
+        image=config.repository + "/backend@sha256:" + "a" * 64,
+    )
+    command = next(c for c in release.commands if "deploy" in c)
+    environment = next(item for item in command if item.startswith("--set-env-vars="))
+    assert "MODEL_PROVIDER=muse" in environment
+    assert "MUSE_MAIN_MODEL=muse-main" in environment
+    assert "MUSE_SEGMENTATION_MODEL=sam-3.1" in environment
+    assert "ANNOTATION_WORKER_URL=https://test.run.app" in environment
+    secrets = next(item for item in command if item.startswith("--set-secrets="))
+    assert "MUSE_API_KEY=muse-secret:7" in secrets
+    assert "GROQ_API_KEY" not in secrets

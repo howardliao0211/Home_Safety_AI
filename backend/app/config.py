@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     groq_model: str = ""
     muse_api_key: SecretStr | None = None
     muse_main_model: str = ""
+    muse_segmentation_model: str = ""
+    annotation_worker_url: str = ""
+    annotation_worker_service_account: str = ""
+    annotation_tasks_queue: str = ""
     model_timeout_seconds: float = 90
     google_cloud_project: str = "home-safety-local"
     firestore_database_id: str = "(default)"
@@ -41,6 +45,19 @@ class Settings(BaseSettings):
                 raise ValueError("MUSE_API_KEY is required for MODEL_PROVIDER=muse")
             if not self.muse_main_model.strip():
                 raise ValueError("MUSE_MAIN_MODEL is required for MODEL_PROVIDER=muse")
+        if self.muse_segmentation_model and not self.muse_segmentation_model.strip():
+            raise ValueError("MUSE_SEGMENTATION_MODEL must be nonempty when configured")
+        dispatch = [
+            self.annotation_worker_url,
+            self.annotation_worker_service_account,
+            self.annotation_tasks_queue,
+        ]
+        if any(dispatch) and not all(dispatch):
+            raise ValueError(
+                "Annotation worker URL, service account and queue must be configured together"
+            )
+        if self.annotation_worker_url and not self.annotation_worker_url.startswith("https://"):
+            raise ValueError("Annotation worker URL must use HTTPS")
         if self.environment == "production":
             if self.firestore_emulator_host or self.storage_emulator_host:
                 raise ValueError("Emulator endpoints are forbidden in production")

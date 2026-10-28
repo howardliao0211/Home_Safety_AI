@@ -1,3 +1,4 @@
+import { FindingHighlight } from "@/components/finding-highlight";
 import { apiEnabled } from "@/api/config";
 import { useState } from "react";
 import { TextInput, View } from "react-native";
@@ -48,7 +49,11 @@ export default function FindingScreen() {
               : "Dismissed by you"}
         </Copy>
       </View>
-      <PhotoView photo={assessment.photo} compact />
+      <FindingHighlight
+        key={`${finding.id}-${finding.contentRevision}`}
+        assessment={assessment}
+        finding={finding}
+      />
       <PreviewNotice />
       <Section
         title={apiEnabled ? "Visible evidence" : "What the sample describes"}
@@ -124,6 +129,29 @@ export default function FindingScreen() {
               </>
             )}
             <Copy>{s.feedback}</Copy>
+          </Panel>
+        ))}
+      {finding.evidenceHistory
+        ?.filter((snapshot) => snapshot.revision !== finding.contentRevision)
+        .map((snapshot) => (
+          <Panel key={snapshot.revision}>
+            <Copy kind="eyebrow">EARLIER FINDING EVIDENCE</Copy>
+            <Copy kind="heading">{snapshot.content.title}</Copy>
+            <Copy>{snapshot.content.evidence}</Copy>
+            <Copy>{snapshot.content.recommendation}</Copy>
+            <Copy kind="small">{snapshot.content.uncertainty}</Copy>
+            {finding.annotations
+              ?.filter(
+                (annotation) => annotation.revision === snapshot.revision,
+              )
+              .map((annotation) => (
+                <FindingHighlight
+                  key={annotation.id}
+                  assessment={assessment}
+                  finding={finding}
+                  historical={annotation}
+                />
+              ))}
           </Panel>
         ))}
       <Section title="You make the final call">

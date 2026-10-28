@@ -240,3 +240,42 @@ References: [Cloud Run container contract](https://docs.cloud.google.com/run/doc
 [secret versions](https://docs.cloud.google.com/run/docs/configuring/services/secrets),
 [deployment flags](https://docs.cloud.google.com/sdk/gcloud/reference/run/deploy),
 [billing](https://docs.cloud.google.com/run/docs/configuring/billing-settings).
+
+## Durable finding highlights
+
+Terraform provisions the annotation Cloud Tasks queue, enqueue/OIDC IAM, a
+collection-group dispatch index, and the Muse Secret Manager container. Cloud Run
+continues to be released by the release CLI. No infrastructure is applied merely
+by changing these files.
+
+For an existing deployment, set Terraform `annotation_worker_url` to the stable
+Cloud Run service origin (no revision tag/path) and apply Terraform. This also
+creates a once-per-minute authenticated Cloud Scheduler recovery job. On a fresh
+project, first release the backend without segmentation to obtain that URL, then
+set the variable and re-apply. Leave highlighting disabled until recovery exists.
+
+Upload a numbered Muse key and release explicitly:
+
+```sh
+backend/.venv/bin/python scripts/deploy-gcp.py secrets --provider muse
+backend/.venv/bin/python scripts/deploy-gcp.py release --provider muse \
+  --model YOUR_MUSE_MAIN_MODEL --segmentation-model sam-3.1
+```
+
+The release pins `MUSE_API_KEY` and the demo token to numbered secret versions,
+and sets the segmentation model, queue resource name, stable worker URL and
+worker service-account identity from Terraform outputs. Use `--provider groq`
+for existing Groq releases, which expose highlighting as unavailable.
+The public Cloud Run service verifies Google OIDC identity/audience inside the
+internal worker routes; the demo token cannot trigger workers. Cloud Tasks may
+redeliver infrastructure work, but Firestore atomically fences every started
+attempt. A lost attempt fails after lease expiry, and only explicit user retry
+starts new model work. Different assessments may process concurrently.
+
+A deployment smoke check should request two finding highlights, disconnect the
+client, inspect their persisted outcomes, deliver an already-started task twice,
+and temporarily deny enqueue permission to confirm the Scheduler recovers queued
+intent after restoring permission. Confirm only one selection/segmentation/review
+per attempt and verify a demo bearer token alone receives `401` on internal routes.
+Cloud delivery is covered locally with a fake Cloud Tasks transport and OIDC
+verifier; a real deployed Cloud Tasks/Scheduler smoke check remains required.

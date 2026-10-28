@@ -19,6 +19,7 @@ class AssessmentRepository(Protocol):
         """Atomically read, apply a pure callback, and write/delete one assessment."""
         ...
 
+    def annotation_pending(self) -> list[Assessment]: ...
     def close(self) -> None: ...
 
 
@@ -70,6 +71,13 @@ class FirestoreRepository:
             return updated
 
         return run(self.client.transaction())
+
+    def annotation_pending(self):
+        # One field collection-group index, maintained by Firestore automatically.
+        query = self.client.collection_group("assessments").where(
+            filter=firestore.FieldFilter("annotation_dispatch_pending", "==", True)
+        )
+        return [Assessment.model_validate(s.to_dict()) for s in query.stream(timeout=10)]
 
     def close(self):
         self.client.close()

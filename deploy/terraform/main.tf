@@ -7,6 +7,8 @@ locals {
   }
   services = toset([
     "artifactregistry.googleapis.com",
+    "cloudtasks.googleapis.com",
+    "cloudscheduler.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "firestore.googleapis.com",
     "iam.googleapis.com",
@@ -89,7 +91,7 @@ resource "google_artifact_registry_repository" "backend" {
 }
 
 resource "google_secret_manager_secret" "backend" {
-  for_each  = toset(["groq-api-key", "demo-bearer-token"])
+  for_each  = toset(["groq-api-key", "muse-api-key", "demo-bearer-token"])
   secret_id = "home-safety-${each.key}"
   labels    = local.labels
   replication {
@@ -103,4 +105,77 @@ resource "google_secret_manager_secret_iam_member" "backend" {
   secret_id = each.value.id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.backend.email}"
+}
+
+# Dispatch survives Cloud Run request/process lifetimes. Firestore leases, rather
+# than this shared queue, enforce one active attempt per assessment.
+resource "google_cloud_tasks_queue" "annotations" {
+  name     = "home-safety-annotations"
+  location = var.region
+  rate_limits {
+    max_dispatches_per_second = 5
+    max_concurrent_dispatches = 10
+  }
+  retry_config {
+    max_attempts = 5
+    min_backoff  = "5s"
+    max_backoff  = "60s"
+  }
+  depends_on = [google_project_service.required]
+}
+
+resource "google_project_iam_member" "annotation_enqueue" {
+  project = var.project_id
+  role    = "roles/cloudtasks.enqueuer"
+  member  = "serviceAccount:${google_service_account.backend.email}"
+}
+
+resource "google_service_account_iam_member" "annotation_act_as" {
+  service_account_id = google_service_account.backend.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.backend.email}"
+}
+
+# Needed for Cloud Tasks to mint OIDC tokens for its HTTP deliveries.
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
+resource "google_service_account_iam_member" "annotation_oidc" {
+  service_account_id = google_service_account.backend.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-cloudtasks.iam.gserviceaccount.com"
+  depends_on         = [google_project_service.required]
+}
+
+# The initial Cloud Run URL is known only after the first release. Set it and
+# re-apply Terraform before enabling highlighting in a production revision.
+resource "google_cloud_scheduler_job" "annotation_recovery" {
+  count     = var.annotation_worker_url == "" ? 0 : 1
+  name      = "home-safety-annotation-recovery"
+  region    = var.region
+  schedule  = "* * * * *"
+  time_zone = "Etc/UTC"
+  http_target {
+    uri         = "${trimsuffix(var.annotation_worker_url, "/")}/internal/annotations/recover"
+    http_method = "POST"
+    oidc_token {
+      service_account_email = google_service_account.backend.email
+      audience              = trimsuffix(var.annotation_worker_url, "/")
+    }
+  }
+  depends_on = [google_project_service.required]
+}
+
+resource "google_firestore_field" "annotation_dispatch" {
+  project    = var.project_id
+  database   = google_firestore_database.assessments.name
+  collection = "assessments"
+  field      = "annotation_dispatch_pending"
+  index_config {
+    indexes {
+      order       = "ASCENDING"
+      query_scope = "COLLECTION_GROUP"
+    }
+  }
 }

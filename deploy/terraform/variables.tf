@@ -9,3 +9,13 @@ variable "region" {
   type        = string
   default     = "us-central1"
 }
+
+variable "annotation_worker_url" {
+  description = "Stable Cloud Run service URL; set after the initial release to enable durable annotation recovery."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.annotation_worker_url == "" || can(regex("^https://[^/]+/?$", var.annotation_worker_url))
+    error_message = "Use the stable HTTPS service origin, without a path."
+  }
+}

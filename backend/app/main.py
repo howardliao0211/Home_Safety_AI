@@ -5,6 +5,9 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.annotations.dispatch import CloudTasksDispatcher, worker_router
+from app.annotations.provider import MuseHighlightProvider
+from app.annotations.service import AnnotationService
 from app.api.cors import ConfiguredCORS
 from app.api.routes import router
 from app.assessments.service import AssessmentService
@@ -18,7 +21,14 @@ from app.storage.repository import FirestoreRepository
 logger = logging.getLogger(__name__)
 
 
-def create_app(settings=None, repository=None, photos=None, provider=None) -> FastAPI:
+def create_app(
+    settings=None,
+    repository=None,
+    photos=None,
+    provider=None,
+    highlight_provider=None,
+    dispatcher=None,
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app):
         config = settings or Settings()
@@ -46,6 +56,17 @@ def create_app(settings=None, repository=None, photos=None, provider=None) -> Fa
             stack.callback(images.close)
             app.state.settings = config
             app.state.service = AssessmentService(records, images, model)
+            highlighting = highlight_provider or (
+                MuseHighlightProvider(config)
+                if config.model_provider == "muse"
+                and config.muse_segmentation_model.strip()
+                and (config.environment == "local" or config.annotation_tasks_queue)
+                else None
+            )
+            dispatch = dispatcher or (
+                CloudTasksDispatcher(config) if config.annotation_tasks_queue else None
+            )
+            app.state.annotations = AnnotationService(records, images, highlighting, dispatch)
             yield
 
     app = FastAPI(title="Home Safety AI", version="0.1.0", lifespan=lifespan)
@@ -105,6 +126,7 @@ def create_app(settings=None, repository=None, photos=None, provider=None) -> Fa
         )
 
     app.include_router(router)
+    app.include_router(worker_router)
     app.add_middleware(ConfiguredCORS)
     return app
 

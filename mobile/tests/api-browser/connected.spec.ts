@@ -311,3 +311,124 @@ test("real file upload, failed status write, server restart state and latest res
   await expect(page).toHaveURL(new RegExp(`/assessment/${first.id}$`));
   await expect(page.getByText("1 of 2 handled", { exact: true })).toBeVisible();
 });
+
+test("finding highlights stay asynchronous, align in zoom, hide and report independently of checklist status", async ({
+  page,
+  request,
+}) => {
+  let requests = 0;
+  let reported = false;
+  let annotationState = "queued";
+  let job: Record<string, unknown>;
+  await page.route("**/findings/*/annotations**", async (route) => {
+    const url = route.request().url();
+    if (url.endsWith("/mask")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "image/png",
+        body: Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==",
+          "base64",
+        ),
+      });
+      return;
+    }
+    if (url.endsWith("/feedback")) {
+      reported = true;
+      annotationState = "reported";
+    }
+    if (route.request().method() === "POST" && url.endsWith("/annotations")) {
+      requests++;
+      const body = route.request().postDataJSON();
+      if (body.retry) annotationState = "queued";
+      const saved = await serverAssessment(page, request);
+      job = {
+        id: "test-annotation",
+        revision: "initial",
+        photo_id: saved.photo.id,
+        photo_kind: "original",
+        width: 1200,
+        height: 800,
+        orientation: 1,
+      };
+    }
+    await route.fulfill({
+      status: annotationState === "queued" ? 202 : 200,
+      json: {
+        ...job,
+        state: annotationState,
+        reason: reported ? "You reported the wrong object." : null,
+      },
+    });
+  });
+  await start(page);
+  await page.getByRole("button", { name: "Use living room sample" }).click();
+  await submit(page);
+  await expect(page.getByText("0 of 2 handled", { exact: true })).toBeVisible();
+  expect(requests).toBe(0);
+  await page.getByRole("button", { name: /Check the cabinet/ }).click();
+  await expect(
+    page.getByText("Highlight queued…", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("A cable is visible across the walking route.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Mark resolved", exact: true }),
+  ).toBeEnabled();
+  annotationState = "ready";
+  const highlight = page.getByRole("img", {
+    name: "Reviewed object highlight",
+    exact: true,
+  });
+  await expect(highlight).toBeVisible();
+  await page
+    .getByRole("button", { name: "Hide highlights", exact: true })
+    .click();
+  await expect(highlight).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Show highlights", exact: true })
+    .click();
+  await expect(highlight).toBeVisible();
+  await page
+    .getByRole("button", { name: "Zoom photo", exact: true })
+    .first()
+    .click();
+  await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+  const zoomed = page
+    .getByRole("img", { name: "Reviewed object highlight", exact: true })
+    .last();
+  const maskBox = await zoomed.boundingBox();
+  const imageBox = await page
+    .getByRole("img", { name: "Original evidence photo", exact: true })
+    .last()
+    .boundingBox();
+  expect(maskBox).toEqual(imageBox);
+  await page.getByRole("button", { name: "Close photo", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Wrong object highlighted", exact: true })
+    .click();
+  await expect(
+    page.getByText("You reported the wrong object.", { exact: true }),
+  ).toBeVisible();
+  expect(reported).toBe(true);
+  await expect(highlight).toHaveCount(0);
+  expect(
+    (await serverAssessment(page, request)).findings.every(
+      (f: { status: string }) => f.status === "open",
+    ),
+  ).toBe(true);
+  await page.reload();
+  await expect(
+    page.getByText("You reported the wrong object.", { exact: true }),
+  ).toBeVisible();
+  await expect(highlight).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Retry highlight", exact: true })
+    .click();
+  await expect(
+    page.getByText("Highlight queued…", { exact: true }),
+  ).toBeVisible();
+});
