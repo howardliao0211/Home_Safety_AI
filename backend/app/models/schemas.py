@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Text = Annotated[str, Field(min_length=1, max_length=3000)]
 Profile = Literal["Older adult", "Child", "Baby", "Pet"]
@@ -122,7 +122,18 @@ class Annotation(StrictModel):
     expires_at: datetime | None = None
     mask: Photo | None = None
     request_id: str
-    dispatch_pending: bool = True
+
+    @model_validator(mode="after")
+    def reject_late_publication(self):
+        if (
+            self.state == "ready"
+            and self.finished_at
+            and self.expires_at
+            and self.finished_at > self.expires_at
+        ):
+            self.state = "failed"
+            self.reason = "Highlight publication exceeded its deadline. Retry when ready."
+        return self
 
 
 class EvidenceSnapshot(StrictModel):
@@ -173,6 +184,15 @@ class Assessment(Operation):
     lease: Lease | None = None
     annotations: list[Annotation] = Field(default_factory=list)
     annotation_dispatch_pending: bool = False
+    annotation_commits: dict[str, datetime] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_annotation_commits(self):
+        for job in self.annotations:
+            if job.id in self.annotation_commits:
+                job.finished_at = self.annotation_commits[job.id]
+                job.reject_late_publication()
+        return self
 
 
 class FindingPatch(StrictModel):

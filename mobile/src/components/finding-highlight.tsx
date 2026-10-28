@@ -35,7 +35,7 @@ export function FindingHighlight({
   const generation = useRef(0);
   const apply = useCallback(
     async (value: Annotation, token: number) => {
-      if (token !== generation.current) return;
+      if (token !== generation.current) return false;
       setAnnotation(value);
       setError(undefined);
       setMask(undefined);
@@ -57,8 +57,10 @@ export function FindingHighlight({
             setError(
               e instanceof Error ? e.message : "Could not load highlight.",
             );
+          return false;
         }
       }
+      return true;
     },
     [assessment.id, finding.id],
   );
@@ -70,11 +72,17 @@ export function FindingHighlight({
       setHidden(false);
       setMask(undefined);
       let checking = false;
+      let assetFailed = false;
+      let readFailed = false;
       const check = async () => {
-        if (token !== generation.current || checking || action.current) return;
+        if (!apiEnabled || token !== generation.current || checking || action.current) return;
         checking = true;
         try {
-          if (!apiEnabled) return;
+          readFailed = false;
+          if (last?.state === "ready" && assetFailed) {
+            assetFailed = !(await apply(last, token));
+            return;
+          }
           const api = await annotationClient();
           last = historical?.id
             ? await api.annotation(assessment.id, finding.id, historical.id)
@@ -85,17 +93,27 @@ export function FindingHighlight({
                   finding.id,
                   revision,
                 );
-          await apply(last, token);
+          assetFailed = !(await apply(last, token));
         } catch (e) {
-          if (e instanceof ApiError && e.status === 409)
-            await refreshAssessment(assessment.id);
+          if (token !== generation.current) return;
+          readFailed = true;
+          if (e instanceof ApiError && e.status === 409) {
+            try {
+              await refreshAssessment(assessment.id);
+            } catch {
+              /* Retry on reconnect. */
+            }
+          }
           if (token === generation.current)
             setError(e instanceof Error ? e.message : "Highlight unavailable.");
         } finally {
           checking = false;
           if (
             token === generation.current &&
-            (!last || ["queued", "processing"].includes(last.state))
+            (!last ||
+              assetFailed ||
+              readFailed ||
+              ["queued", "processing"].includes(last.state))
           )
             timer = setTimeout(() => void check(), 2000);
         }
@@ -116,7 +134,8 @@ export function FindingHighlight({
     if (action.current) return;
     action.current = true;
     setActing(true);
-    const token = generation.current;
+    if (report) setHidden(true);
+    const token = ++generation.current;
     try {
       const api = await annotationClient();
       const result =
@@ -128,6 +147,7 @@ export function FindingHighlight({
               revision,
               true,
             );
+      if (token !== generation.current) return;
       setHidden(false);
       await apply(result, token);
       // Restart polling for the new attempt; the operation is owned by the server.
@@ -203,8 +223,15 @@ export function FindingHighlight({
               />
             </>
           )}
+          {!!error && current?.state === "ready" && (
+            <Button
+              label="Reload highlight"
+              variant="secondary"
+              onPress={() => setPollAttempt((value) => value + 1)}
+            />
+          )}
           {!historical &&
-            (error ||
+            ((error && current?.state !== "ready") ||
               (current &&
                 ["failed", "unavailable", "reported"].includes(
                   current.state,

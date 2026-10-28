@@ -320,9 +320,17 @@ test("finding highlights stay asynchronous, align in zoom, hide and report indep
   let reported = false;
   let annotationState = "queued";
   let job: Record<string, unknown>;
+  let maskOffline = true;
+  let delayNextRead = false;
+  let pendingRead = false;
+  let releaseRead: () => void = () => {};
   await page.route("**/findings/*/annotations**", async (route) => {
     const url = route.request().url();
     if (url.endsWith("/mask")) {
+      if (maskOffline) {
+        await route.abort();
+        return;
+      }
       await route.fulfill({
         status: 200,
         contentType: "image/png",
@@ -331,6 +339,15 @@ test("finding highlights stay asynchronous, align in zoom, hide and report indep
           "base64",
         ),
       });
+      return;
+    }
+    if (delayNextRead && route.request().method() === "GET") {
+      delayNextRead = false;
+      pendingRead = true;
+      await new Promise<void>((resolve) => {
+        releaseRead = resolve;
+      });
+      await route.fulfill({ status: 200, json: { ...job, state: "ready" } });
       return;
     }
     if (url.endsWith("/feedback")) {
@@ -383,7 +400,15 @@ test("finding highlights stay asynchronous, align in zoom, hide and report indep
     name: "Reviewed object highlight",
     exact: true,
   });
+  await expect(
+    page.getByRole("button", { name: "Reload highlight", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Retry highlight", exact: true }),
+  ).toHaveCount(0);
+  maskOffline = false;
   await expect(highlight).toBeVisible();
+  expect(requests).toBe(1);
   await page
     .getByRole("button", { name: "Hide highlights", exact: true })
     .click();
@@ -407,6 +432,12 @@ test("finding highlights stay asynchronous, align in zoom, hide and report indep
     .boundingBox();
   expect(maskBox).toEqual(imageBox);
   await page.getByRole("button", { name: "Close photo", exact: true }).click();
+  delayNextRead = true;
+  await page.evaluate(() =>
+    document.dispatchEvent(new Event("visibilitychange")),
+  );
+  await expect.poll(() => pendingRead).toBe(true);
+
   await page
     .getByRole("button", { name: "Wrong object highlighted", exact: true })
     .click();
@@ -414,6 +445,23 @@ test("finding highlights stay asynchronous, align in zoom, hide and report indep
     page.getByText("You reported the wrong object.", { exact: true }),
   ).toBeVisible();
   expect(reported).toBe(true);
+  const oldRead = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      response.url().endsWith("/test-annotation"),
+  );
+  releaseRead();
+  await oldRead;
+  await page.evaluate(
+    () =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      ),
+  );
+  await expect(
+    page.getByText("You reported the wrong object.", { exact: true }),
+  ).toBeVisible();
+
   await expect(highlight).toHaveCount(0);
   expect(
     (await serverAssessment(page, request)).findings.every(

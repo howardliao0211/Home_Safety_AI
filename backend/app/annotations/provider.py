@@ -10,13 +10,13 @@ import io
 import json
 import math
 import re
-import time
 from dataclasses import dataclass
 
 import httpx
 from meta_sam_parser import CompletedOutcome, decode_mask_to_raster, image_segmentation_format
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
+from app.annotations.budget import bounded_cpu, remaining
 from app.models.schemas import Region, StrictModel
 
 
@@ -39,13 +39,6 @@ class Candidate:
     region: Region
 
 
-def remaining(deadline):
-    seconds = deadline - time.monotonic()
-    if seconds <= 0:
-        raise TimeoutError()
-    return seconds
-
-
 def image_part(data, content_type="image/jpeg"):
     encoded = base64.b64encode(data).decode("ascii")
     return {"type": "input_image", "image_url": f"data:{content_type};base64,{encoded}"}
@@ -66,6 +59,77 @@ def highlight(mask):
     outline = Image.new("RGBA", mask.size, (115, 45, 0, 255))
     overlay.paste(outline, (0, 0), edge)
     return overlay
+
+
+def decode_candidates(text, size):
+    w, h = size
+    parser = image_segmentation_format().create_parser()
+    parser.push(text)
+    dimensions = re.findall(r";w=([0-9]+);h=([0-9]+)(?:;c=[0-9.]+)?\|>", text)
+    if any((int(width), int(height)) != size for width, height in dimensions):
+        raise ValueError("Source dimensions mismatch")
+    result = parser.finish(CompletedOutcome()).result
+    if result.diagnostics:
+        raise ValueError("Malformed segmentation")
+    candidates = []
+    for record in result.records:
+        if record.kind != "mask":
+            continue
+        if len(candidates) >= 12 or record.frame is not None:
+            raise ValueError("Invalid candidate count or frame")
+        b = record.bounds
+        bounds = (b.left, b.top, b.right, b.bottom)
+        if not all(math.isfinite(v) and int(v) == v for v in bounds):
+            raise ValueError("Invalid mask geometry")
+        left, top, right, bottom = map(int, bounds)
+        if not (0 <= left < right <= w and 0 <= top < bottom <= h):
+            raise ValueError("Out of bounds mask")
+        if (record.mask.width, record.mask.height) != (right - left, bottom - top):
+            raise ValueError("Mask size mismatch")
+        raster = decode_mask_to_raster(record.mask)
+        local = Image.frombytes("L", (record.mask.width, record.mask.height), raster).point(
+            lambda v: 255 if v else 0
+        )
+        mask = Image.new("L", size)
+        mask.paste(local, (left, top))
+        if mask.getbbox() is None:
+            raise ValueError("Empty mask")
+        candidates.append(
+            Candidate(
+                record.object_id,
+                mask,
+                Region(
+                    x=left / w,
+                    y=top / h,
+                    width=(right - left) / w,
+                    height=(bottom - top) / h,
+                ),
+            )
+        )
+    if len({c.id for c in candidates}) != len(candidates):
+        raise ValueError("Duplicate candidates")
+    return candidates
+
+
+def review_images(data, candidates):
+    images = [image_part(data)]
+    for candidate in candidates:
+        original = Image.open(io.BytesIO(data)).convert("RGBA")
+        original = Image.alpha_composite(original, highlight(candidate.mask))
+        ImageDraw.Draw(original).text(
+            (10, 10),
+            f"Candidate {candidate.id}",
+            fill="black",
+            stroke_width=2,
+            stroke_fill="white",
+        )
+        images.extend(
+            [
+                {"type": "input_text", "text": f"Candidate {candidate.id}"},
+                image_part(png(original), "image/png"),
+            ]
+        )
+    return images
 
 
 class MuseHighlightProvider:
@@ -147,7 +211,6 @@ class MuseHighlightProvider:
             min(h - 1, math.ceil((r.y + r.height) * h) - 1),
         )
         prompt = f"<0f>1<|box;x1={x1};y1={y1};x2={x2};y2={y2};w={w};h={h}|>"
-        parser = image_segmentation_format().create_parser()
         completed = False
         total = 0
         raw = []
@@ -182,7 +245,6 @@ class MuseHighlightProvider:
                     event = json.loads(line[5:].strip())
                     if event["type"] == "response.output_text.delta":
                         raw.append(event["delta"])
-                        parser.push(event["delta"])
                     elif event["type"] == "response.completed":
                         completed = True
                         break
@@ -190,69 +252,10 @@ class MuseHighlightProvider:
                         raise ValueError("Segmentation failed")
         if not completed:
             raise ValueError("Incomplete segmentation")
-        dimensions = re.findall(r";w=([0-9]+);h=([0-9]+)(?:;c=[0-9.]+)?\|>", "".join(raw))
-        if any((int(width), int(height)) != size for width, height in dimensions):
-            raise ValueError("Source dimensions mismatch")
-        result = parser.finish(CompletedOutcome()).result
-        if result.diagnostics:
-            raise ValueError("Malformed segmentation")
-        candidates = []
-        for record in result.records:
-            if record.kind != "mask":
-                continue
-            if len(candidates) >= 12 or record.frame is not None:
-                raise ValueError("Invalid candidate count or frame")
-            b = record.bounds
-            bounds = (b.left, b.top, b.right, b.bottom)
-            if not all(math.isfinite(v) and int(v) == v for v in bounds):
-                raise ValueError("Invalid mask geometry")
-            left, top, right, bottom = map(int, bounds)
-            if not (0 <= left < right <= w and 0 <= top < bottom <= h):
-                raise ValueError("Out of bounds mask")
-            if (record.mask.width, record.mask.height) != (right - left, bottom - top):
-                raise ValueError("Mask size mismatch")
-            raster = decode_mask_to_raster(record.mask)
-            local = Image.frombytes("L", (record.mask.width, record.mask.height), raster).point(
-                lambda v: 255 if v else 0
-            )
-            mask = Image.new("L", size)
-            mask.paste(local, (left, top))
-            if mask.getbbox() is None:
-                raise ValueError("Empty mask")
-            candidates.append(
-                Candidate(
-                    record.object_id,
-                    mask,
-                    Region(
-                        x=left / w,
-                        y=top / h,
-                        width=(right - left) / w,
-                        height=(bottom - top) / h,
-                    ),
-                )
-            )
-        if len({c.id for c in candidates}) != len(candidates):
-            raise ValueError("Duplicate candidates")
-        return candidates
+        return await bounded_cpu(decode_candidates, "".join(raw), size, deadline=deadline)
 
     async def review(self, data, content, selection, candidates, deadline):
-        images = [image_part(data)]
-        for candidate in candidates:
-            original = Image.open(io.BytesIO(data)).convert("RGBA")
-            original = Image.alpha_composite(original, highlight(candidate.mask))
-            ImageDraw.Draw(original).text(
-                (10, 10),
-                f"Candidate {candidate.id}",
-                fill="black",
-                stroke_width=2,
-                stroke_fill="white",
-            )
-            images.extend(
-                [
-                    {"type": "input_text", "text": f"Candidate {candidate.id}"},
-                    image_part(png(original), "image/png"),
-                ]
-            )
+        images = await bounded_cpu(review_images, data, candidates, deadline=deadline)
         return await self.structured(
             "Review localisation only. Compare the original with the labelled candidate overlays. "
             "Approve exactly one candidate only if all visible mask components belong to the SAME "
@@ -264,3 +267,7 @@ class MuseHighlightProvider:
             Review,
             deadline,
         )
+
+
+def mask_overlay(mask):
+    return png(highlight(mask))

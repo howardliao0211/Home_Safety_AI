@@ -16,3 +16,10 @@ including uploads that race deletion after the assessment document disappears.
 The independent local worker uses the same transitions with the storage emulators.
 Embedding bounded metadata/history keeps queue claims atomic; the existing
 Firestore document size guard and a 120-attempt limit bound demo retention.
+
+Annotation writes use update-time compare-and-set preconditions with SDK retries
+disabled and explicit remaining-budget timeouts. A sibling map stores server-side
+publication timestamps (Firestore cannot transform values inside annotation
+arrays), so a late commit is failed before client metadata or masks are served.
+SAM parsing/raster decoding and overlay construction run in killable processes,
+so synchronous mask work cannot prevent deadline cancellation.

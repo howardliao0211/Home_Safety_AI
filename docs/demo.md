@@ -280,3 +280,13 @@ Manual device/provider cases still to run:
 Live MUSE segmentation quality and physical Android gestures have not been
 validated by these deterministic fixtures. An approved contour is localisation
 assistance only and must never be described as a professional safety verification.
+
+Review caught and corrected three operational edges: publication now bounds
+Firestore compare-and-set writes by the remaining budget and checks authoritative
+server commit timestamps before exposing a ready mask; mask CPU work runs in a
+killable process; and explicit feedback invalidates in-flight mobile reads.
+A failed mask download now retries that saved asset on reconnect and offers
+“Reload highlight,” without creating another model attempt. Regression checks
+exercise a delayed ready response after feedback and an interrupted mask download.
+One existing connected latest-assessment test failed transiently during the first
+full run; it passed in isolation and the subsequent complete connected suite.

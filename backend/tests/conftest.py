@@ -32,7 +32,7 @@ class MemoryRepository:
             ]
             return copy.deepcopy(max(records, key=lambda a: a.created_at)) if records else None
 
-    def mutate(self, device_id, assessment_id, change):
+    def mutate(self, device_id, assessment_id, change, *, deadline=None):
         with self.lock:
             key = (device_id, assessment_id)
             updated = change(copy.deepcopy(self.records.get(key)))

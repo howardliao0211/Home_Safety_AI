@@ -450,3 +450,55 @@ def test_no_match_saves_selected_source_and_stays_terminal_on_open(rig, assessed
     assert saved["width"] == 100 and saved["height"] == 60
     assert client.post(base, json={"revision": "initial"}).json()["id"] == job["id"]
     assert provider.calls == ["select", "segment"]
+
+
+def test_late_publication_commit_is_never_visible_as_ready(rig, assessed):
+    from datetime import timedelta
+
+    client, repo, *_ = rig
+    svc, _ = enabled(rig)
+    original = repo.mutate
+
+    def commit_late(device, aid, change, **kwargs):
+        def delayed(a):
+            updated = change(a)
+            for j in updated.annotations:
+                if j.state == "ready":
+                    # Simulate the server's actual commit timestamp arriving late,
+                    # after the callback checked its lease and built a ready write.
+                    j.finished_at = j.expires_at + timedelta(seconds=1)
+            return updated
+
+        return original(device, aid, delayed)
+
+    base = path(assessed)
+    job = client.post(base, json={"revision": "initial"}).json()
+    repo.mutate = commit_late
+    svc.work(client.headers["X-Device-ID"], assessed["id"])
+    assert client.get(base + "/" + job["id"]).json()["state"] == "failed"
+    assert client.get(base + "/" + job["id"] + "/mask").status_code == 404
+
+
+def slow_overlay_for_worker_test(mask):
+    import time
+
+    time.sleep(10)
+    return b"late mask"
+
+
+def test_cpu_mask_work_is_killed_at_the_operation_deadline(rig, assessed, monkeypatch):
+    import time
+
+    import app.annotations.service as module
+
+    client, *_ = rig
+    svc, _ = enabled(rig)
+    monkeypatch.setattr(module, "BUDGET_SECONDS", 0.5)
+    monkeypatch.setattr(module, "mask_overlay", slow_overlay_for_worker_test)
+    base = path(assessed)
+    job = client.post(base, json={"revision": "initial"}).json()
+    started = time.monotonic()
+    svc.work(client.headers["X-Device-ID"], assessed["id"])
+    assert time.monotonic() - started < 3
+    assert client.get(base + "/" + job["id"]).json()["state"] == "failed"
+    assert client.get(base + "/" + job["id"] + "/mask").status_code == 404

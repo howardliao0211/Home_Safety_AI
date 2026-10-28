@@ -7,7 +7,8 @@ from datetime import timedelta
 
 from PIL import Image
 
-from app.annotations.provider import highlight, image_part, png, remaining
+from app.annotations.budget import bounded_cpu, remaining
+from app.annotations.provider import image_part, mask_overlay
 from app.assessments.service import finding_in, require
 from app.errors import AppError
 from app.models.schemas import Annotation, EvidenceSnapshot, FindingContent, Photo, new_id, now
@@ -38,9 +39,18 @@ def snapshot(assessment, finding):
 
 
 def public_annotation(job):
-    return job.model_dump(
-        mode="json", exclude={"lease_id", "expires_at", "mask", "request_id", "dispatch_pending"}
+    return job.model_dump(mode="json", exclude={"lease_id", "expires_at", "mask", "request_id"})
+
+
+def annotation_in(assessment, finding_id, annotation_id):
+    finding_in(assessment, finding_id)
+    job = next(
+        (j for j in assessment.annotations if j.id == annotation_id and j.finding_id == finding_id),
+        None,
     )
+    if job is None:
+        raise AppError(404, "not_found", "Highlight not found.")
+    return job
 
 
 class AnnotationService:
@@ -119,24 +129,12 @@ class AnnotationService:
 
     def get(self, device, assessment_id, finding_id, annotation_id):
         a = require(self.repository.get(device, assessment_id))
-        finding_in(a, finding_id)
-        job = next(
-            (j for j in a.annotations if j.id == annotation_id and j.finding_id == finding_id), None
-        )
-        if job is None:
-            raise AppError(404, "not_found", "Highlight not found.")
-        return job
+        return annotation_in(a, finding_id, annotation_id)
 
     def feedback(self, device, assessment_id, finding_id, annotation_id):
         def change(previous):
             a = require(previous)
-            finding_in(a, finding_id)
-            job = next(
-                (j for j in a.annotations if j.id == annotation_id and j.finding_id == finding_id),
-                None,
-            )
-            if not job:
-                raise AppError(404, "not_found", "Highlight not found.")
+            job = annotation_in(a, finding_id, annotation_id)
             if job.state not in {"ready", "reported"}:
                 raise AppError(409, "not_ready", "Only a published highlight can be reported.")
             job.state, job.feedback = "reported", "wrong_object"
@@ -199,7 +197,7 @@ class AnnotationService:
             a.annotation_dispatch_pending = any(j.state in ACTIVE for j in a.annotations)
             return a
 
-        a = self.repository.mutate(device, assessment_id, claim)
+        a = self.repository.mutate(device, assessment_id, claim, deadline=deadline)
         for expired_id in expired:
             self.cleanup(device, assessment_id, expired_id)
         if not claimed:
@@ -240,7 +238,7 @@ class AnnotationService:
                 j.mask = mask
                 return current
 
-            self.repository.mutate(device, assessment_id, reserve)
+            self.repository.mutate(device, assessment_id, reserve, deadline=deadline)
             if mask:
                 self.photos.put(device, assessment_id, mask, mask_data, timeout=remaining(deadline))
             remaining(deadline)
@@ -254,7 +252,7 @@ class AnnotationService:
                 )
                 return current
 
-            self.repository.mutate(device, assessment_id, publish)
+            self.repository.mutate(device, assessment_id, publish, deadline=deadline)
             logger.info(
                 "annotation_finished annotation_id=%s assessment_id=%s finding_id=%s revision=%s request_id=%s stage=publication duration=%.3f state=%s",
                 job.id,
@@ -388,7 +386,9 @@ class AnnotationService:
                 setattr(bound, key, value)
             return current
 
-        await asyncio.to_thread(self.repository.mutate, device, a.id, bind_source)
+        await asyncio.to_thread(
+            self.repository.mutate, device, a.id, bind_source, deadline=deadline
+        )
         remaining(deadline)
         stage[0] = "segmentation"
         segments = await self.provider.segment(data, size, selection, deadline)
@@ -420,7 +420,12 @@ class AnnotationService:
                 None,
             )
         info.update(review="approved", region=chosen[0].region)
-        return "ready", None, info, png(highlight(chosen[0].mask))
+        return (
+            "ready",
+            None,
+            info,
+            await bounded_cpu(mask_overlay, chosen[0].mask, deadline=deadline),
+        )
 
     def cleanup(self, device, assessment_id, annotation_id):
         a = self.repository.get(device, assessment_id)

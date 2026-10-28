@@ -39,7 +39,14 @@ Device = Annotated[str, Depends(device_id)]
 def public(assessment: Assessment) -> dict:
     result = assessment.model_dump(
         mode="json",
-        exclude={"lease", "input_hash", "device_id", "annotations", "annotation_dispatch_pending"},
+        exclude={
+            "lease",
+            "input_hash",
+            "device_id",
+            "annotations",
+            "annotation_dispatch_pending",
+            "annotation_commits",
+        },
     )
     for finding in result["findings"]:
         jobs = [j for j in assessment.annotations if j.finding_id == finding["id"]]

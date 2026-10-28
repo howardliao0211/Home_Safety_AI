@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Image } from "expo-image";
 import { Modal, ScrollView, View, useWindowDimensions } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePreview } from "@/hooks/preview-context";
 import { Button, Copy } from "@/components/ui";
 import type { Photo } from "@/domain/model";
@@ -26,6 +27,7 @@ export function EvidencePhoto({
   const [zoom, setZoom] = useState(1);
   const [expanded, setExpanded] = useState(false);
   const window = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   useEffect(() => {
     let active = true;
     setSource(undefined);
@@ -105,8 +107,8 @@ export function EvidencePhoto({
         <View
           style={{
             flex: 1,
-            paddingTop: 48,
-            paddingBottom: 32,
+            paddingTop: Math.max(insets.top, 16),
+            paddingBottom: Math.max(insets.bottom, 16),
             gap: 12,
             backgroundColor: "white",
           }}
