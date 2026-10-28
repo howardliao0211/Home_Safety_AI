@@ -118,20 +118,59 @@ def test_timeout_has_no_automatic_retry(settings):
     assert len(calls) == 1
 
 
-def test_muse_requires_real_adapter_and_never_falls_back():
-    settings = Settings(_env_file=None, model_provider="muse")
-    with pytest.raises(RuntimeError, match="organisers' API contract"):
-        build_provider(settings)
+def test_muse_requires_its_own_credentials_without_falling_back_to_groq():
+    with pytest.raises(ValidationError, match="MUSE_API_KEY"):
+        Settings(
+            _env_file=None, model_provider="muse", groq_api_key="groq-only", groq_model="groq-model"
+        )
+    with pytest.raises(ValidationError, match="MUSE_MAIN_MODEL") as error:
+        Settings(_env_file=None, model_provider="muse", muse_api_key="private-muse-key")
+    assert "private-muse-key" not in str(error.value)
+
+
+def test_muse_factory_targets_meta_using_backend_key(monkeypatch):
+    from app.models.providers.muse import MuseProvider
+
+    def respond(request):
+        assert str(request.url) == "https://api.meta.ai/v1/responses"
+        assert request.headers["Authorization"] == "Bearer test-muse-key"
+        assert json.loads(request.content)["model"] == "test-muse-model"
+        return httpx.Response(429)
+
+    monkeypatch.setattr(httpx, "HTTPTransport", lambda **kwargs: httpx.MockTransport(respond))
+    provider = build_provider(
+        Settings(
+            _env_file=None,
+            model_provider="muse",
+            muse_api_key="test-muse-key",
+            muse_main_model="test-muse-model",
+        )
+    )
+    try:
+        assert isinstance(provider, MuseProvider) and provider.name == "muse"
+        with pytest.raises(ModelError) as error:
+            provider.generate(system="rules", context={}, images=[], schema=AssessmentResult)
+        assert error.value.upstream_status == 429
+    finally:
+        provider.close()
 
 
 def test_production_disallows_emulators_and_requires_demo_token():
     with pytest.raises(ValidationError, match="DEMO_BEARER_TOKEN"):
-        Settings(_env_file=None, environment="production", model_provider="muse")
+        Settings(
+            _env_file=None,
+            environment="production",
+            model_provider="muse",
+            muse_api_key="test-key",
+            muse_main_model="test-model",
+        )
     with pytest.raises(ValidationError, match="Emulator endpoints"):
         Settings(
             _env_file=None,
             environment="production",
             model_provider="muse",
+            muse_api_key="test-key",
+            muse_main_model="test-model",
             firestore_emulator_host="127.0.0.1:8080",
             demo_bearer_token="demo",
         )

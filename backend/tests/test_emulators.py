@@ -96,7 +96,7 @@ def test_cloud_adapters_roundtrip_restart_and_delete(photo_bytes, monkeypatch):
 @pytest.mark.skipif(
     os.getenv("RUN_LIVE_MODEL_TESTS") != "1", reason="Opt in to a real paid model call."
 )
-def test_real_groq_photo_assessment_and_review(monkeypatch):
+def test_real_model_photo_assessment_and_review(monkeypatch):
     monkeypatch.setenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")
     config = Settings()
     assert config.environment == "local", "Live smoke test must use local storage"
@@ -120,7 +120,10 @@ def test_real_groq_photo_assessment_and_review(monkeypatch):
             response = client.post(path + "/analyze")
             assert response.status_code == 200, response.text
             assessment = response.json()
-            assert assessment["status"] == "complete" and assessment["provider"] == "groq"
+            assert (
+                assessment["status"] == "complete"
+                and assessment["provider"] == config.model_provider
+            )
             # This verifies the integration, not detection accuracy on a single scene.
             if assessment["findings"]:
                 # Explicit smoke-test pacing for small development quotas. The

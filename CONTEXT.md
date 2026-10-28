@@ -83,16 +83,14 @@ professional home safety inspection.”
   on GCP Cloud Run in `us-central1`, project `home-safety-ai`. Start with 1 CPU,
   2 GiB RAM, concurrency 2, minimum 0 and maximum 2 instances, and a 300-second
   request timeout. Container images live in Artifact Registry.
-- Model integration: Meta Muse remains required for the final hackathon demo.
-  Groq is explicitly permitted for development while Muse access is pending.
-  Select the provider using `MODEL_PROVIDER`; Groq uses backend-only
-  `GROQ_API_KEY` and `GROQ_MODEL`. There is no automatic provider fallback.
-  The hackathon organisers will provide the Muse API. Defer exact model ID,
-  endpoint, credentials, and API contract until their integration details arrive;
-  do not assume the public Meta Model API or `muse-spark-1.3` is the supplied API.
-  Isolate each API behind the shared model adapter interface. Implement the Muse
-  adapter when its supplied contract arrives, then select it through configuration.
-  Public API research does not determine this integration.
+- Model integration: Meta Muse is the demo provider, selected explicitly with
+  `MODEL_PROVIDER=muse`, backend-only `MUSE_API_KEY`, and `MUSE_MAIN_MODEL`.
+  The supplied Meta sample establishes `https://api.meta.ai/v1/responses` and
+  bearer authentication. The Muse adapter sends inline photos and requests strict
+  structured output with server-managed response history disabled. Groq remains
+  available for development through `MODEL_PROVIDER=groq`, `GROQ_API_KEY`, and
+  `GROQ_MODEL`. Both implement the shared model adapter interface. There is no
+  automatic provider fallback or model retry.
 - Persistence: Firestore Standard edition in Native mode, located in `us-central1`.
   FastAPI accesses Firestore using the dedicated Cloud Run service account; the mobile
   app accesses all assessment data through FastAPI. No SQLite or separate data disk.
@@ -167,13 +165,8 @@ a no-hazards result.
 - `.scratch/<feature>/`: local specs and individual implementation tickets.
 - The mobile app connects to FastAPI by default; explicit preview mode uses
   simulated assessments and separate local state. The FastAPI backend implements
-  assessment workflows with a Groq development adapter and Firestore/GCS storage. Local setup and
+  assessment workflows with Muse/Groq adapters and Firestore/GCS storage. Local setup and
   the HTTP contract are documented in `backend/README.md`.
   Shared GCP resources live in `deploy/terraform/`; `scripts/deploy-gcp.py` owns
   image releases, Cloud Run revisions/traffic, verification and rollback.
   Provisioning and releases are separate; see `deploy/README.md`.
-
-## Pending integration details
-
-- Obtain the Muse API integration details from the hackathon organisers when available.
-

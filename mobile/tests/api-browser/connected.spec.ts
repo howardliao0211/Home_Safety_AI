@@ -139,7 +139,7 @@ test("connected lifecycle: upload, retained failures, retry, cache-free restore,
   ).toBeVisible();
   await expect(
     page.getByRole("textbox", { name: "Your answer", exact: true }),
-  ).toBeDisabled();
+  ).not.toBeEditable();
   await page.reload();
   await expect(
     page.getByRole("textbox", { name: "Your answer", exact: true }),

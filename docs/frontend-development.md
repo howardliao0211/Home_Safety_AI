@@ -108,7 +108,7 @@ For connected browser journeys, install backend dependencies and start the
 storage emulators as described in the backend guide, then run
 `npm run test:e2e:api`. It starts its own API on 8001 and Expo on 8082. The
 fixture exercises real HTTP and emulator storage with a deterministic model;
-it does not call Groq or measure detection accuracy. It uses separate device
+it does not call Muse or Groq or measure detection accuracy. It uses separate device
 IDs and deletes its test assessments. Keep ports 8001, 8082, and 8083 free.
 
 ## Backend integration

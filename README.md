@@ -6,7 +6,7 @@ and pets.
 
 The Expo / React Native frontend connects to the local FastAPI backend by
 default. Submitted photos are analysed using the backend's configured model
-provider (Groq for development). An explicit preview mode uses predefined
+provider (Muse for the demo; Groq remains selectable). An explicit preview mode uses predefined
 examples and works without a backend or credentials.
 
 ## Development environment
@@ -73,7 +73,7 @@ integration for your distro. Confirm `docker compose version` works in WSL.
 ### Terminal 1: storage and backend
 
 If the root `.env` does not exist, copy `.env.example` to `.env`. Edit it locally
-to set `MODEL_PROVIDER=groq`, `GROQ_API_KEY`, and `GROQ_MODEL`. Preserve any
+to set `MODEL_PROVIDER=muse`, `MUSE_API_KEY`, and `MUSE_MAIN_MODEL`. Preserve any
 existing credentials; model keys belong only in the backend environment.
 
 ```bash
@@ -118,14 +118,14 @@ Open the localhost URL printed by Expo, usually `http://localhost:8081`.
 Use port 8081 for the documented local CORS defaults.
 
 Choose **Start with a room**, select a photo or bundled sample, choose optional
-household profiles, and create an assessment. This sends a real request to Groq
+household profiles, and create an assessment. This sends a real request to the selected model provider
 and consumes model quota. Check that findings appear, resolve/dismiss actions
 survive reload, a linked follow-up updates its finding, and confirmed deletion
 removes the assessment. Failed analysis retains the input and offers an explicit
 Retry action.
 
 If the app shows **Retry connecting**, check that both emulator containers and
-Uvicorn are running, the API URL is correct, and the demo tokens match. A Groq
+Uvicorn are running, the API URL is correct, and the demo tokens match. A model
 quota error requires a manual retry after cooldown.
 
 ### Automated connected test without model calls
@@ -140,7 +140,7 @@ npm run test:e2e:api
 
 This starts its own test API on 8001 and frontend on 8082 with a deterministic
 model. Keep those ports free. It checks integration behavior without calling
-Groq; it does not verify live model output.
+Muse or Groq; it does not verify live model output.
 
 ### Stop local testing
 
@@ -211,7 +211,7 @@ npm run test:e2e:api
 The preview browser runner starts its own Expo server on port 8083. The API
 suite starts a deterministic model fixture on 8001 and Expo on 8082, using real
 storage emulators on 8080 and 4443. Screenshots and test artifacts are written
-to the ignored `.tools/` directory. Neither suite calls Groq.
+to the ignored `.tools/` directory. Neither suite calls Muse or Groq.
 
 Check Expo compatibility and build both targets without an Android SDK:
 
@@ -234,7 +234,7 @@ Use `npm run format` to format the frontend source and tests.
 | `mobile/src/hooks/` | Shared frontend state and actions |
 | `mobile/src/storage/` | Local persistence and photo retention |
 | `mobile/tests/` | State tests and browser journeys |
-| `backend/` | FastAPI assessment backend, Groq adapter, Firestore/GCS storage and tests |
+| `backend/` | FastAPI assessment backend, Muse/Groq adapters, Firestore/GCS storage and tests |
 | `deploy/terraform/` | Shared Cloud Run infrastructure, storage, registry and secret IAM |
 
 API mode retains assessment state and photos through the backend, scoped by a
@@ -247,8 +247,8 @@ detail, [demo notes](docs/demo.md) for verified behavior and pending device
 checks, and [CONTEXT.md](CONTEXT.md) for product requirements and the planned
 backend architecture.
 
-See the [backend development guide](backend/README.md) to run the real Groq-backed
-API locally, inspect its endpoints, and prepare the future Muse integration.
+See the [backend development guide](backend/README.md) to run the Muse-backed
+API locally, inspect its endpoints, or explicitly switch to Groq.
 The frontend uses this API by default; preview mode remains available explicitly.
 
 See the [Cloud Run deployment guide](deploy/README.md) for the production Docker

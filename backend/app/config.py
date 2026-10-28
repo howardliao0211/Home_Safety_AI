@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     model_provider: Literal["groq", "muse"] = "groq"
     groq_api_key: SecretStr | None = None
     groq_model: str = ""
+    muse_api_key: SecretStr | None = None
+    muse_main_model: str = ""
     model_timeout_seconds: float = 90
     google_cloud_project: str = "home-safety-local"
     firestore_database_id: str = "(default)"
@@ -34,6 +36,11 @@ class Settings(BaseSettings):
                 raise ValueError("GROQ_API_KEY is required for MODEL_PROVIDER=groq")
             if not self.groq_model.strip():
                 raise ValueError("GROQ_MODEL is required for MODEL_PROVIDER=groq")
+        else:
+            if not self.muse_api_key or not self.muse_api_key.get_secret_value().strip():
+                raise ValueError("MUSE_API_KEY is required for MODEL_PROVIDER=muse")
+            if not self.muse_main_model.strip():
+                raise ValueError("MUSE_MAIN_MODEL is required for MODEL_PROVIDER=muse")
         if self.environment == "production":
             if self.firestore_emulator_host or self.storage_emulator_host:
                 raise ValueError("Emulator endpoints are forbidden in production")

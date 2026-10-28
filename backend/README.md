@@ -2,14 +2,14 @@
 
 FastAPI implements photo assessments, focused follow-ups, user-requested photo
 reviews, finding status/checklist actions, latest-assessment retrieval, retained
-evidence, and retryable deletion. Groq is the development model provider. The
+evidence, and retryable deletion. Muse is the demo model provider; Groq remains an explicit development option. The
 Expo frontend connects to this API by default; explicit preview mode remains
 available without a backend.
 
 ## Start locally
 
 Requirements: Python 3.10+, [uv](https://docs.astral.sh/uv/), Docker Engine with
-Compose, and your Groq credentials. Java and gcloud run inside the Firestore
+Compose, and your Meta Muse credentials. Java and gcloud run inside the Firestore
 container, so host installations are unnecessary. Run from the repository root:
 
 ```bash
@@ -26,19 +26,33 @@ logs --tail=30` from the repo root. A daemon/socket permission error means Docke
 needs to be made accessible in your development environment.
 
 The backend loads the root `.env`, then optional `backend/.env`; actual process
-environment variables take precedence. Your existing `GROQ_API_KEY` and
-`GROQ_MODEL` are sufficient, with `MODEL_PROVIDER=groq` and local storage as
-defaults. Keep the key server-side. See [`.env.example`](../.env.example) for
-configuration; preserve your existing `.env` when adding settings.
-`GROQ_API_KEY` must be a Groq API key. `GROQ_MODEL` is the model hosted on Groq,
-for example `qwen/qwen3.8-27b`. The adapter sends requests to
-`https://api.groq.com/openai/v1/chat/completions`.
+environment variables take precedence. Configure the backend-only settings:
+
+```dotenv
+MODEL_PROVIDER=muse
+MUSE_API_KEY=your-meta-api-key
+MUSE_MAIN_MODEL=muse-wonder-1.0
+```
+
+Keep your existing `.env`; add or update these names without copying credentials
+into the frontend. The supplied Meta sample calls the key `MODEL_API_KEY`; this
+application reads `MUSE_API_KEY` instead. The adapter uses bearer authentication
+at `https://api.meta.ai/v1/responses`. It submits inline base64 photos, requests
+strict JSON through `text.format`, uses `stream=false` and `store=false`, and
+validates model output before storing it. It does not create Meta-managed
+conversation history; this is not a guarantee about other provider retention.
+
+To use Groq explicitly, set `MODEL_PROVIDER=groq`, `GROQ_API_KEY`, and
+`GROQ_MODEL`. Its endpoint remains
+`https://api.groq.com/openai/v1/chat/completions`. There is no automatic fallback.
+With no provider setting the code retains the Groq default for existing setups;
+the example environment selects Muse explicitly.
 
 Local mode always uses storage emulators, with anonymous credentials. Defaults:
 
 | Setting | Local default |
 | --- | --- |
-| `MODEL_PROVIDER` | `groq` |
+| `MODEL_PROVIDER` | `groq` if unset; `.env.example` selects `muse` |
 | `MODEL_TIMEOUT_SECONDS` | `90` (allowed 1–120) |
 | `GOOGLE_CLOUD_PROJECT` | `home-safety-local` |
 | `FIRESTORE_DATABASE_ID` | `(default)` |
@@ -122,7 +136,7 @@ curl --fail-with-body -X POST \
 ```
 
 Add your bearer header if configured. Reuse the same device ID on subsequent
-requests. A real analysis sends the photo to Groq and consumes your quota.
+requests. A real analysis sends the photo to the selected model provider and consumes your quota.
 
 ## Retry and state rules
 
@@ -165,31 +179,28 @@ DELETE with the same device/resource IDs. An active operation can delay deletion
 until it finishes or its lease expires. Photos are private and returned with
 `Cache-Control: no-store` through the API.
 
-## Switching to Muse
+## Model adapters
 
 The workflow depends only on `ModelProvider.generate` in
-[`app/models/providers/base.py`](app/models/providers/base.py): system instructions,
-plain context, up to two private image payloads, and a provider-neutral output
-schema. Prompts live in `app/assessments/prompts/`; the controller validates
-every response with Pydantic before applying it to stored state. Provider/model
-provenance is recorded per analysis attempt.
+[`app/models/providers/base.py`](app/models/providers/base.py): safety
+instructions, plain context, up to two private images, and a provider-neutral
+output schema. The controller validates the result with Pydantic and records
+provider/model provenance per analysis attempt. Routes, prompts, storage, and
+user-controlled finding status remain shared.
 
-Once the organisers supply the real Muse API contract:
+The Muse adapter implements the supplied Meta Responses contract. It reads only
+completed assistant output-text blocks, ignores reasoning items, and rejects
+refusals, incomplete responses, malformed JSON, and non-object results. HTTP and
+transport failures become safe diagnostic categories; raw provider bodies,
+credentials, and photos are not logged. Retries remain manual.
 
-1. Implement a Muse adapter with `name`, `model`, `generate`, and `close`. Map its
-   image/authentication/response conventions to the shared interface. Return JSON
-   data or a `ModelError` containing safe diagnostics; keep retries disabled.
-2. Add Muse credential/model settings and register its adapter in `build_provider`
-   in `app/models/providers/factory.py`. Extend provider contract tests using its
-   actual response format.
-3. Configure `MODEL_PROVIDER=muse` and backend-only Muse credentials, then run
-   the same workflow and real-photo smoke checks.
+Meta references: [Responses](https://dev.meta.ai/docs/protocols/responses),
+[photo input](https://dev.meta.ai/docs/image-understanding), and
+[structured output](https://dev.meta.ai/docs/structured-output).
 
-Routes, prompts, domain state and storage stay shared. Selecting Muse today fails
-at startup with a clear pending-contract message. No endpoint, model ID, or
-OpenAI-compatible contract is assumed for Muse. Groq's photo/strict JSON behavior
-is documented in its [model reference](https://console.groq.com/docs/model/qwen/qwen3.8-27b)
-and [structured output guide](https://console.groq.com/docs/structured-outputs).
+This change covers local integration. The current Cloud Run release script and
+Terraform secret setup still configure Groq; adapting cloud release tooling to
+Muse is separate work. Do not treat switching the local `.env` as a cloud release.
 
 ## Verification
 
@@ -204,16 +215,16 @@ RUN_EMULATOR_RESTART_TESTS=1 uv run pytest tests/test_emulator_restart.py -q
 ```
 
 The default suite uses in-memory test doubles, exercises the real HTTP routes,
-and mocks Groq's HTTP boundary. Emulator checks use actual Firestore/GCS clients,
+and mocks the Muse and Groq HTTP boundaries. Emulator checks use actual Firestore/GCS clients,
 retained evidence, linked revisions, status persistence and deletion. The restart
 check actually stops/starts both local storage containers, verifying their named
 volumes and the Firestore export/import path. A separate
-opt-in check makes up to two real Groq calls using the bundled room photo and
+opt-in check makes up to two real calls to the selected provider using the bundled room photo and
 cleans its local records afterward:
 
 ```bash
 RUN_EMULATOR_TESTS=1 RUN_LIVE_MODEL_TESTS=1 \
-  uv run pytest tests/test_emulators.py::test_real_groq_photo_assessment_and_review -q
+  uv run pytest tests/test_emulators.py::test_real_model_photo_assessment_and_review -q
 ```
 
 For a small development quota, add `LIVE_MODEL_INTERVAL_SECONDS=60` to space

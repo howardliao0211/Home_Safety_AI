@@ -215,3 +215,37 @@ Review identified and corrected a restoration edge: a retained server assessment
 with `status=ready` now requires explicit Retry after reconnecting. Reloading a
 failed upload must not automatically retry that upload or start model analysis.
 Physical Android networking and camera checks remain pending.
+
+## Muse local integration — 2026-10-28
+
+The supplied Meta Responses sample is now implemented by a dedicated Muse
+adapter. Local configuration selects `MODEL_PROVIDER=muse` using backend-only
+`MUSE_API_KEY` and `MUSE_MAIN_MODEL`. Groq remains explicitly selectable, without
+fallback. Requests use inline photos, strict structured output, and `store=false`
+to disable Meta-managed response history. App retries remain manual.
+
+Verified against the configured live Muse model:
+
+- The bundled room photo produced a Pydantic-valid assessment; a separate
+  two-image review produced a valid revised finding and feedback.
+- Chromium → Expo → FastAPI → Muse → Firestore/GCS completed an assessment,
+  restored it after reload, and completed a linked evidence check. A finding
+  marked resolved by the user stayed resolved after the model update.
+- The browser check used a new device identity and removed its assessment and
+  photos afterward. No existing user assessments were changed.
+
+The backend suite passed 60 tests with three opt-in tests skipped; an additional
+Firestore/GCS round-trip check passed against the running storage emulators.
+Ruff lint and format checks passed. These establish integration behavior, not
+hazard-detection accuracy. The local browser check used the concurrent frontend
+fetch-receiver fix present in the workspace.
+
+Frontend typechecking and all 13 unit tests passed. All three deterministic
+connected Chromium journeys passed against emulator storage, including retained
+initial and linked failures, manual retries, frozen submitted evidence, private
+photo restore, status persistence, and deletion. The immutability assertion now
+checks that the readonly answer cannot be edited rather than requiring a
+disabled textarea.
+
+No cloud release or infrastructure changes were made. Cloud release tooling
+still configures Groq and needs separate Muse configuration before deployment.
