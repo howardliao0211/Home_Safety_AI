@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import httpx
 from meta_sam_parser import CompletedOutcome, decode_mask_to_raster, image_segmentation_format
-from PIL import Image, ImageChops, ImageFilter
+from PIL import Image, ImageDraw
 
 from app.annotations.budget import bounded_cpu, remaining
 from app.models.schemas import Region
@@ -46,13 +46,29 @@ def png(image):
 
 
 def highlight(mask):
-    edge = ImageChops.subtract(
-        mask.filter(ImageFilter.MaxFilter(5)), mask.filter(ImageFilter.MinFilter(5))
+    """Tint the object's shape and draw a padded box around it.
+
+    Sizes scale with the photo so the box stays visible after the phone shrinks it.
+    """
+    w, h = mask.size
+    side = max(w, h)
+    line = max(3, round(side * 0.006))
+    rim = max(1, line // 3)
+    pad = round(side * 0.02)
+    overlay = Image.new("RGBA", mask.size, (255, 122, 0, 0))
+    overlay.putalpha(mask.point(lambda value: 102 if value else 0))
+    left, top, right, bottom = mask.getbbox()
+    box = (
+        max(0, left - pad),
+        max(0, top - pad),
+        min(w - 1, right - 1 + pad),
+        min(h - 1, bottom - 1 + pad),
     )
-    overlay = Image.new("RGBA", mask.size, (255, 170, 0, 0))
-    overlay.putalpha(mask.point(lambda value: 85 if value else 0))
-    outline = Image.new("RGBA", mask.size, (115, 45, 0, 255))
-    overlay.paste(outline, (0, 0), edge)
+    draw = ImageDraw.Draw(overlay)
+    radius = round(line * 2.5)
+    draw.rounded_rectangle(box, radius, outline=(60, 25, 0, 255), width=line + 2 * rim)
+    inner = (box[0] + rim, box[1] + rim, box[2] - rim, box[3] - rim)
+    draw.rounded_rectangle(inner, max(0, radius - rim), outline=(255, 122, 0, 255), width=line)
     return overlay
 
 
