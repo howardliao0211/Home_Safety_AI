@@ -290,3 +290,31 @@ A failed mask download now retries that saved asset on reconnect and offers
 exercise a delayed ready response after feedback and an interrupted mask download.
 One existing connected latest-assessment test failed transiently during the first
 full run; it passed in isolation and the subsequent complete connected suite.
+
+## Eager prompt-based highlights — 2026-10-28
+
+Supersedes the on-demand flow above (ADR 0003). The assessment call returns a
+segmentation prompt per finding; completion queues one SAM attempt per finding
+with no further main-model calls. Opening a finding only reads saved state.
+
+Automated deterministic checks cover: one initial attempt per eligible finding in
+the completion commit; missing, blank and over-long prompts; unsupported
+configuration; one SAM request per attempt; highest-score selection with equal,
+absent, mixed and out-of-range scores; invalid masks, malformed geometry, duplicate
+IDs, excessive output and zero matches; a held attempt while its sibling reaches
+ready; 12 overlapping attempts through both the local worker and the Cloud Tasks
+route; per-finding failure and deadline isolation; dispatch outage recovery;
+revision, deletion, expiry and late-commit fences; legacy attempts without prompts;
+and the browser flow (fetch-only polling that stops at terminal state, inline
+alignment without zoom, hide, report, reload, explicit retry).
+
+Not yet measured: live SAM 3.1 instance selection, assessment-completion to
+highlight-ready timing, and provider call counts against the previous flow.
+Record representative live cases here, for example:
+
+- Curtains near a heater: the prompt should be "curtains" and the mask the curtains.
+- Repeated objects (several outlets or cords): note when the highest-scored
+  instance is not the one the finding means. This is the known cost of removing
+  localisation review; positional words in prompts are unreliable.
+- Portrait, landscape and EXIF-rotated photos on Android: the inline overlay must
+  stay aligned.

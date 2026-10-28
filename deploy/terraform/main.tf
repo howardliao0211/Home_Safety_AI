@@ -107,14 +107,14 @@ resource "google_secret_manager_secret_iam_member" "backend" {
   member    = "serviceAccount:${google_service_account.backend.email}"
 }
 
-# Dispatch survives Cloud Run request/process lifetimes. Firestore leases, rather
-# than this shared queue, enforce one active attempt per assessment.
+# Dispatch survives Cloud Run request/process lifetimes. Each highlight attempt is
+# its own task and Firestore claim; limits admit 12 overlapping attempts per assessment.
 resource "google_cloud_tasks_queue" "annotations" {
   name     = "home-safety-annotations"
   location = var.region
   rate_limits {
-    max_dispatches_per_second = 5
-    max_concurrent_dispatches = 10
+    max_dispatches_per_second = 20
+    max_concurrent_dispatches = 24
   }
   retry_config {
     max_attempts = 5

@@ -1,8 +1,8 @@
-"""MUSE selection/review and a separate SAM streaming mask adapter.
+"""SAM 3.1 concept segmentation adapter and deterministic candidate choice.
 
 Wire format: https://dev.meta.ai/docs/sam/reading-segmentation
-The official parser decodes box-local base85 masks; safety JSON is never used
-as a mask format. No adapter method retries a request.
+The official parser decodes box-local masks; safety JSON is never used as a mask
+format. The main model is never called here, and no method retries a request.
 """
 
 import base64
@@ -14,22 +14,16 @@ from dataclasses import dataclass
 
 import httpx
 from meta_sam_parser import CompletedOutcome, decode_mask_to_raster, image_segmentation_format
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageFilter
 
 from app.annotations.budget import bounded_cpu, remaining
-from app.models.schemas import Region, StrictModel
+from app.models.schemas import Region
 
-
-class Selection(StrictModel):
-    photo_id: str | None
-    target: str | None
-    # Spatial guidance disambiguates instances. No object is represented by null.
-    region: Region | None
-
-
-class Review(StrictModel):
-    candidate_id: str | None
-    same_single_object: bool
+# Above this, the best overall candidate cannot be claimed; the attempt fails.
+MAX_CANDIDATES = 32
+# Parser codes for one invalid candidate. Other errors make the response untrustworthy;
+# an invalid box also stops the parser reading later candidates on its line.
+CANDIDATE_ERRORS = {"invalid_mask_size", "invalid_mask_payload"}
 
 
 @dataclass
@@ -37,6 +31,7 @@ class Candidate:
     id: str
     mask: Image.Image  # Full source size, binary L raster.
     region: Region
+    confidence: float | None = None
 
 
 def image_part(data, content_type="image/jpeg"):
@@ -62,30 +57,42 @@ def highlight(mask):
 
 
 def decode_candidates(text, size):
+    """Decode SAM output in provider order, excluding individually invalid candidates.
+
+    Returns (candidates, excluded_count). Malformed output or source geometry fails.
+    """
     w, h = size
     parser = image_segmentation_format().create_parser()
     parser.push(text)
-    dimensions = re.findall(r";w=([0-9]+);h=([0-9]+)(?:;c=[0-9.]+)?\|>", text)
+    dimensions = re.findall(r";w=([0-9]+);h=([0-9]+)(?:;c=[^|;]*)?\|>", text)
     if any((int(width), int(height)) != size for width, height in dimensions):
         raise ValueError("Source dimensions mismatch")
     result = parser.finish(CompletedOutcome()).result
-    if result.diagnostics:
+    errors = [d for d in result.diagnostics if d.severity == "error"]
+    if any(d.code not in CANDIDATE_ERRORS for d in errors):
         raise ValueError("Malformed segmentation")
+    masks = [r for r in result.records if r.kind == "mask"]
+    if len(masks) + len(errors) > MAX_CANDIDATES:
+        raise ValueError("Too many segmentation candidates")
+    if any(r.frame is not None for r in masks):
+        raise ValueError("Unexpected frame")
+    if len({r.object_id for r in masks}) != len(masks):
+        raise ValueError("Duplicate candidates")
     candidates = []
-    for record in result.records:
-        if record.kind != "mask":
-            continue
-        if len(candidates) >= 12 or record.frame is not None:
-            raise ValueError("Invalid candidate count or frame")
+    excluded = len(errors)
+    for record in masks:
         b = record.bounds
         bounds = (b.left, b.top, b.right, b.bottom)
         if not all(math.isfinite(v) and int(v) == v for v in bounds):
-            raise ValueError("Invalid mask geometry")
+            excluded += 1
+            continue
         left, top, right, bottom = map(int, bounds)
-        if not (0 <= left < right <= w and 0 <= top < bottom <= h):
-            raise ValueError("Out of bounds mask")
-        if (record.mask.width, record.mask.height) != (right - left, bottom - top):
-            raise ValueError("Mask size mismatch")
+        if not (0 <= left < right <= w and 0 <= top < bottom <= h) or (
+            record.mask.width,
+            record.mask.height,
+        ) != (right - left, bottom - top):
+            excluded += 1
+            continue
         raster = decode_mask_to_raster(record.mask)
         local = Image.frombytes("L", (record.mask.width, record.mask.height), raster).point(
             lambda v: 255 if v else 0
@@ -93,7 +100,8 @@ def decode_candidates(text, size):
         mask = Image.new("L", size)
         mask.paste(local, (left, top))
         if mask.getbbox() is None:
-            raise ValueError("Empty mask")
+            excluded += 1
+            continue
         candidates.append(
             Candidate(
                 record.object_id,
@@ -104,32 +112,46 @@ def decode_candidates(text, size):
                     width=(right - left) / w,
                     height=(bottom - top) / h,
                 ),
+                record.confidence,
             )
         )
-    if len({c.id for c in candidates}) != len(candidates):
-        raise ValueError("Duplicate candidates")
-    return candidates
+    return candidates, excluded
 
 
-def review_images(data, candidates):
-    images = [image_part(data)]
-    for candidate in candidates:
-        original = Image.open(io.BytesIO(data)).convert("RGBA")
-        original = Image.alpha_composite(original, highlight(candidate.mask))
-        ImageDraw.Draw(original).text(
-            (10, 10),
-            f"Candidate {candidate.id}",
-            fill="black",
-            stroke_width=2,
-            stroke_fill="white",
-        )
-        images.extend(
-            [
-                {"type": "input_text", "text": f"Candidate {candidate.id}"},
-                image_part(png(original), "image/png"),
-            ]
-        )
-    return images
+def valid(candidate, size):
+    r = candidate.region
+    return (
+        candidate.mask.size == size
+        and candidate.mask.mode == "L"
+        and candidate.mask.getbbox() is not None
+        and r.x + r.width <= 1
+        and r.y + r.height <= 1
+    )
+
+
+def score(candidate):
+    c = candidate.confidence
+    if isinstance(c, (int, float)) and not isinstance(c, bool) and math.isfinite(c) and 0 <= c <= 1:
+        return c
+    return None
+
+
+def choose(candidates, size):
+    """Highest valid confidence; scored before unscored; ties and unscored keep provider order.
+
+    Object IDs are never treated as scores. Different instances are never merged.
+    """
+    usable = [c for c in candidates if valid(c, size)]
+    if not usable:
+        raise ValueError("No valid segmentation candidate")
+    scored = [c for c in usable if score(c) is not None]
+    if scored:
+        # max() returns the first of equal maxima, preserving provider order.
+        best = max(scored, key=score)
+        best.confidence = score(best)
+        return best
+    usable[0].confidence = None
+    return usable[0]
 
 
 class MuseHighlightProvider:
@@ -144,73 +166,8 @@ class MuseHighlightProvider:
             transport=httpx.AsyncHTTPTransport(retries=0),
         )
 
-    async def structured(self, instructions, context, images, schema, deadline):
-        async with self.client(deadline) as client:
-            response = await client.post(
-                "responses",
-                json={
-                    "model": self.settings.muse_main_model,
-                    "instructions": instructions,
-                    "input": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "input_text", "text": json.dumps(context)},
-                                *images,
-                            ],
-                        }
-                    ],
-                    "text": {
-                        "format": {
-                            "type": "json_schema",
-                            "name": schema.__name__,
-                            "schema": schema.model_json_schema(),
-                            "strict": True,
-                        }
-                    },
-                    "max_output_tokens": 1500,
-                    "stream": False,
-                    "store": False,
-                },
-            )
-            response.raise_for_status()
-            body = response.json()
-            if body["status"] != "completed":
-                raise ValueError("Incomplete structured response")
-            blocks = [
-                block
-                for item in body["output"]
-                if item["type"] == "message"
-                for block in item["content"]
-            ]
-            if not blocks or any(block["type"] != "output_text" for block in blocks):
-                raise ValueError("Invalid structured response")
-            return schema.model_validate_json("".join(block["text"] for block in blocks))
-
-    async def select(self, content, evidence, images, deadline):
-        return await self.structured(
-            "Select exactly one visible main object supported by this finding's evidence. "
-            "Prefer the object the recommended action concerns. Choose only a relevant listed "
-            "photo; distinguish repeated objects with a tight normalized bounding region. "
-            "Return all null fields if no suitable single visible object exists. "
-            "Do not infer invisible changes, anchoring, resolution, or safety verification.",
-            {"finding": content, "evidence": evidence},
-            images,
-            Selection,
-            deadline,
-        )
-
-    async def segment(self, data, size, selection, deadline):
-        w, h = size
-        r = selection.region
-        if r.x + r.width > 1 or r.y + r.height > 1:
-            raise ValueError("Invalid selection geometry")
-        x1, y1 = int(r.x * w), int(r.y * h)
-        x2, y2 = (
-            min(w - 1, math.ceil((r.x + r.width) * w) - 1),
-            min(h - 1, math.ceil((r.y + r.height) * h) - 1),
-        )
-        prompt = f"<0f>1<|box;x1={x1};y1={y1};x2={x2};y2={y2};w={w};h={h}|>"
+    async def segment(self, data, size, prompt, deadline):
+        """One SAM request: the image plus one short noun phrase, no box."""
         completed = False
         total = 0
         raw = []
@@ -231,7 +188,7 @@ class MuseHighlightProvider:
                     ],
                     "stream": True,
                     "store": False,
-                    "metadata": {"mask_encoding": "one_bit"},
+                    "metadata": {"mask_encoding": "one_bit", "include_confidence": "true"},
                 },
             ) as response:
                 response.raise_for_status()
@@ -252,21 +209,12 @@ class MuseHighlightProvider:
                         raise ValueError("Segmentation failed")
         if not completed:
             raise ValueError("Incomplete segmentation")
-        return await bounded_cpu(decode_candidates, "".join(raw), size, deadline=deadline)
-
-    async def review(self, data, content, selection, candidates, deadline):
-        images = await bounded_cpu(review_images, data, candidates, deadline=deadline)
-        return await self.structured(
-            "Review localisation only. Compare the original with the labelled candidate overlays. "
-            "Approve exactly one candidate only if all visible mask components belong to the SAME "
-            "single object instance intended by the finding and selection. Reject unrelated, "
-            "ambiguous, empty, or multiple-object masks. Return candidate_id null and "
-            "same_single_object false on rejection. Do not revise the finding or verify safety.",
-            {"finding": content, "selection": selection.model_dump()},
-            images,
-            Review,
-            deadline,
+        candidates, excluded = await bounded_cpu(
+            decode_candidates, "".join(raw), size, deadline=deadline
         )
+        if excluded and not candidates:
+            raise ValueError("Every segmentation candidate was invalid")
+        return candidates
 
 
 def mask_overlay(mask):

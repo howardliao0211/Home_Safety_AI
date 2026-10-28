@@ -81,7 +81,7 @@ professional home safety inspection.”
   iOS support is deferred.
 - Backend: FastAPI, including the assessment controller, in a Docker container
   on GCP Cloud Run in `us-central1`, project `home-safety-ai`. Start with 1 CPU,
-  2 GiB RAM, concurrency 2, minimum 0 and maximum 2 instances, and a 300-second
+  2 GiB RAM, concurrency 8, minimum 0 and maximum 2 instances, and a 300-second
   request timeout. Container images live in Artifact Registry.
 - Model integration: Meta Muse is the demo provider, selected explicitly with
   `MODEL_PROVIDER=muse`, backend-only `MUSE_API_KEY`, and `MUSE_MAIN_MODEL`.
@@ -175,10 +175,15 @@ a no-hazards result.
 supporting evidence, separate from its checklist status. Successful follow-up or
 review analysis creates a new revision; status changes and failed analysis do not.
 
-**Highlight** (annotation): An optional, reviewed localisation of one main visible
-object in one supporting photo for a finding-content revision. It helps locate
-evidence and does not verify safety, anchoring, or resolution.
+**Highlight** (annotation): An optional, AI-generated, unreviewed localisation of
+one main visible object in the initial assessment photo for an initial finding.
+The assessment names the object with a short segmentation prompt; SAM supplies
+the mask. It helps locate evidence, may mark the wrong instance, and does not
+verify safety, anchoring, or resolution.
 
-**Highlight attempt**: A single requested selection, segmentation, and localisation
-review, with a persisted outcome. Retrying is an explicit user action; reporting
-an incorrect object hides that result without changing the finding's status.
+**Highlight attempt**: One prompt-based segmentation of a saved prompt and photo,
+with a persisted outcome. Initial attempts start when the assessment completes and
+run independently of each other and of the app. Retrying is an explicit user
+action that reuses the saved prompt; reporting an incorrect object hides that
+result without changing the finding's status. Follow-up and review revisions do
+not generate highlights.

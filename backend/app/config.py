@@ -47,6 +47,9 @@ class Settings(BaseSettings):
                 raise ValueError("MUSE_MAIN_MODEL is required for MODEL_PROVIDER=muse")
         if self.muse_segmentation_model and not self.muse_segmentation_model.strip():
             raise ValueError("MUSE_SEGMENTATION_MODEL must be nonempty when configured")
+        # Highlights rely on SAM 3.1's noun-phrase prompts and per-object confidence.
+        if self.muse_segmentation_model and not self.muse_segmentation_model.startswith("sam-3.1"):
+            raise ValueError("MUSE_SEGMENTATION_MODEL must be a sam-3.1 model")
         dispatch = [
             self.annotation_worker_url,
             self.annotation_worker_service_account,

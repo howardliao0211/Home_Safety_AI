@@ -240,3 +240,24 @@ def test_muse_release_pins_key_and_wires_durable_highlighting(config):
     secrets = next(item for item in command if item.startswith("--set-secrets="))
     assert "MUSE_API_KEY=muse-secret:7" in secrets
     assert "GROQ_API_KEY" not in secrets
+
+
+def test_capacity_admits_twelve_concurrent_highlight_attempts(config):
+    import re
+    from pathlib import Path
+
+    release = FakeRelease(config)
+    release.release(
+        model="model", provider="groq", image=config.repository + "/backend@sha256:" + "a" * 64
+    )
+    command = next(c for c in release.commands if "deploy" in c)
+
+    def flag(name):
+        return int(next(a for a in command if a.startswith(f"--{name}=")).split("=")[1])
+
+    # One assessment's 12 attempts overlap while the API still serves requests.
+    assert flag("concurrency") * flag("max") >= 12 + 2
+    terraform = (Path(__file__).parents[2] / "deploy/terraform/main.tf").read_text()
+    queue = terraform[terraform.index('resource "google_cloud_tasks_queue"') :]
+    assert int(re.search(r"max_concurrent_dispatches\s*=\s*(\d+)", queue).group(1)) >= 12
+    assert int(re.search(r"max_dispatches_per_second\s*=\s*(\d+)", queue).group(1)) >= 12

@@ -214,10 +214,14 @@ export function completeSubmission(
 export type Annotation = {
   id?: string;
   revision?: string;
+  attempt?: number;
   state:
     "queued" | "processing" | "ready" | "unavailable" | "failed" | "reported";
   reason?: string | null;
   supported?: boolean;
+  /** False for legacy attempts without a saved prompt. */
+  retryable?: boolean;
+  confidence?: number | null;
   photo_id?: string | null;
   photo_kind?: "original" | "follow-up" | "review" | null;
   width?: number | null;

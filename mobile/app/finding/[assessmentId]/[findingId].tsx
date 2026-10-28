@@ -144,6 +144,7 @@ export default function FindingScreen() {
               ?.filter(
                 (annotation) => annotation.revision === snapshot.revision,
               )
+              .slice(-1)
               .map((annotation) => (
                 <FindingHighlight
                   key={annotation.id}

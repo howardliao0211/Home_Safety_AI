@@ -40,6 +40,7 @@ class IntegrationProvider:
                         **common,
                         "title": "Keep the walkway clear",
                         "follow_up": {"kind": "text", "question": "Is this route used at night?"},
+                        "segmentation_prompt": "black power cable",
                     },
                     {
                         **common,
@@ -50,6 +51,7 @@ class IntegrationProvider:
                             "kind": "photo",
                             "question": "Can you safely show the cabinet's wall attachment?",
                         },
+                        "segmentation_prompt": "tall wooden cabinet",
                     },
                 ],
             }

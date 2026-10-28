@@ -18,7 +18,7 @@ longer ours. This workflow supersedes the VM/nginx/Certbot deployment.
 | Secret values and numbered versions | Release CLI `secrets` command, outside Terraform |
 | Model credentials | Secret Manager; referenced by numbered version on each revision |
 
-Cloud Run starts with **1 CPU, 2 GiB RAM, concurrency 2, minimum 0, maximum 2
+Cloud Run starts with **1 CPU, 2 GiB RAM, concurrency 8, minimum 0, maximum 2
 instances**, request-based CPU allocation, and a **300-second request timeout**.
 These are starting settings, not measured capacity guarantees. Google supplies
 the HTTPS `run.app` URL; nginx, a public VM port, an IP certificate, and SSH are
@@ -270,12 +270,16 @@ The public Cloud Run service verifies Google OIDC identity/audience inside the
 internal worker routes; the demo token cannot trigger workers. Cloud Tasks may
 redeliver infrastructure work, but Firestore atomically fences every started
 attempt. A lost attempt fails after lease expiry, and only explicit user retry
-starts new model work. Different assessments may process concurrently.
+starts new model work. Every finding's attempt is its own task, so attempts within
+one assessment run concurrently. Concurrency 8 on 2 instances and the queue's 24
+concurrent dispatches admit 12 overlapping attempts (the finding limit) once both
+instances are running; from a cold start, or under load, some attempts queue (ADR 0003).
 
-A deployment smoke check should request two finding highlights, disconnect the
-client, inspect their persisted outcomes, deliver an already-started task twice,
-and temporarily deny enqueue permission to confirm the Scheduler recovers queued
-intent after restoring permission. Confirm only one selection/segmentation/review
-per attempt and verify a demo bearer token alone receives `401` on internal routes.
+A deployment smoke check should complete a multi-finding assessment without opening
+any finding, disconnect the client, inspect the persisted outcomes, deliver an
+already-started task twice, and temporarily deny enqueue permission to confirm the
+Scheduler recovers queued intent after restoring permission. Confirm exactly one
+SAM request and no main-model call per attempt, and verify a demo bearer token
+alone receives `401` on internal routes.
 Cloud delivery is covered locally with a fake Cloud Tasks transport and OIDC
 verifier; a real deployed Cloud Tasks/Scheduler smoke check remains required.

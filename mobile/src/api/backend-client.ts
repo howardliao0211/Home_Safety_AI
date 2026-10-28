@@ -276,11 +276,11 @@ export class BackendClient {
   async delete(id: string) {
     await this.request(`/v1/assessments/${id}`, { method: "DELETE" });
   }
-  async requestAnnotation(
+  /** Explicit user retry of an initial highlight, using its saved prompt. */
+  async retryAnnotation(
     assessmentId: string,
     findingId: string,
     revision: string,
-    retry = false,
   ): Promise<Annotation> {
     return (
       await this.request(
@@ -288,7 +288,7 @@ export class BackendClient {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ revision, retry }),
+          body: JSON.stringify({ revision, retry: true }),
         },
       )
     ).json();

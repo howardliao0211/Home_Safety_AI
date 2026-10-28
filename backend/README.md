@@ -221,13 +221,19 @@ Build locally with `docker build -t home-safety-backend:dev backend` from the re
 root. See [deploy/README.md](../deploy/README.md) for separate Terraform provisioning,
 Secret Manager initialization, Cloud Run release verification and rollback.
 
-## On-demand finding highlights
+## Finding highlights
 
-Highlighting is separate from safety analysis. Configure `MODEL_PROVIDER=muse`,
-`MUSE_MAIN_MODEL`, backend-only `MUSE_API_KEY`, and `MUSE_SEGMENTATION_MODEL`.
-Missing segmentation configuration or another provider returns an explicit
-unsupported capability without creating an attempt. SAM uses its own streaming
-token/mask parser (`meta-sam-parser`), followed by mandatory main-model review.
+Highlights start automatically when an initial assessment completes. Configure
+`MODEL_PROVIDER=muse`, `MUSE_MAIN_MODEL`, backend-only `MUSE_API_KEY`, and
+`MUSE_SEGMENTATION_MODEL`. The assessment call returns a short
+`segmentation_prompt` per finding (internal, never returned to clients). The
+completion commit saves one initial attempt per finding: `queued` with a valid
+prompt, otherwise `unavailable` with a reason (no object, unusable prompt, or
+unsupported configuration). Each attempt sends that prompt and the initial photo
+to SAM once (`include_confidence: "true"`), parses it with `meta-sam-parser`, and
+publishes the highest-confidence valid mask, falling back to provider order. There
+is no main-model selection or review, so a highlight can mark the wrong instance.
+Follow-up and review revisions never generate highlights.
 
 With the existing Firestore/GCS emulators and API running, start an independent
 worker from `backend/`:
@@ -236,31 +242,32 @@ worker from `backend/`:
 .venv/bin/python -m app.annotations.local_worker
 ```
 
-This worker discovers persisted work itself. Navigating away, stopping polling,
-or restarting the API does not own or cancel it. Stopping the worker mid-attempt
-leaves an expired, manually retryable failure; restarting never repeats that
-attempt's model calls. A queued job retains its place. One job processes per
-assessment, with a 30-second claim budget excluding queue waiting time.
+This worker discovers persisted work itself and runs up to 12 attempts at once.
+Navigating away, stopping polling, or restarting the API does not own or cancel
+it. Stopping the worker mid-attempt leaves an expired, manually retryable
+failure; restarting never repeats that attempt's provider call. Attempts are
+claimed independently, each with a 30-second budget excluding queue waiting time.
 
 Finding JSON adds `content_revision`, `evidence_history`, `annotation` (current
-revision), and `annotations` (attempt metadata). Existing findings start at
-`initial`, with evidence snapshots captured lazily. These routes use the normal
-bearer token and `X-Device-ID`:
+revision), and `annotations` (attempt metadata, including `retryable`). These
+routes use the normal bearer token and `X-Device-ID`:
 
-- `POST .../findings/{finding_id}/annotations`: JSON `{ "revision": "initial", "retry": false }`.
-  Returns `202` with the persisted ID for active work, `200` for terminal/capability
-  responses, or `409` for a stale revision. `retry: true` creates a new attempt only
-  after a terminal result. Repeated taps reuse active work.
-- `GET .../annotations/{id}` returns metadata, without masks, leases or private keys.
+- `POST .../findings/{finding_id}/annotations`: JSON `{ "revision": "initial", "retry": true }`.
+  Explicit retry with the saved prompt: `202` with a new attempt, the active attempt
+  if one is running, `200` with `supported: false` when highlighting is not
+  configured, or `409` for a stale revision, a revised finding, or a legacy attempt
+  without a saved prompt. Without `retry`, it returns the latest attempt.
+- `GET .../annotations/{id}` returns metadata, without masks, leases or prompts.
 - `GET .../annotations/{id}/mask` returns the authorized, source-sized transparent
-  PNG overlay with translucent fill and outline; available only for reviewed,
+  PNG overlay with translucent fill and outline; available only for ready,
   unreported results. The metadata binds it to the exact photo digest, upright
   orientation (`1`), width and height. Regions use top-left normalized coordinates.
 - `POST .../annotations/{id}/feedback` accepts `{ "kind": "wrong_object" }` and
   persistently hides the annotation without modifying finding/checklist state.
 
-The finding screen requests/reuses work on focus, polls active jobs only while
-focused, and resumes on app activation. The overview never requests highlights.
+The finding screen reads the attempt named in the assessment and polls it every
+two seconds while it is queued/processing and the screen is active. It never
+starts model work except through the Retry button. The overview stays unannotated.
 Historical revisions keep their own content, annotation metadata and source photos.
 Mask assets and metadata are deleted with their assessment. Dispatch recovery also
 sweeps orphan masks; private keys and image/mask payloads never enter diagnostics.

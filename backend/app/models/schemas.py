@@ -45,6 +45,20 @@ class FindingContent(StrictModel):
 
 class ProposedFinding(FindingContent):
     follow_up: FollowUpSuggestion | None
+    # Internal localisation metadata. Validated separately from safety content:
+    # a missing or unusable value only makes this finding's highlight unavailable.
+    segmentation_prompt: str | None
+
+    @model_validator(mode="before")
+    @classmethod
+    def tolerate_segmentation_prompt(cls, data):
+        if isinstance(data, dict):
+            value = data.get("segmentation_prompt")
+            data = {
+                **data,
+                "segmentation_prompt": value if value is None or isinstance(value, str) else "",
+            }
+        return data
 
 
 class AssessmentResult(StrictModel):
@@ -113,14 +127,16 @@ class Annotation(StrictModel):
     width: int | None = None
     height: int | None = None
     orientation: Literal[1] = 1  # Uploads are EXIF-transposed before storage.
-    target: str | None = None
+    target: str | None = None  # Legacy selection label.
     region: Region | None = None
-    review: Literal["approved", "rejected"] | None = None
+    confidence: float | None = None
+    review: Literal["approved", "rejected"] | None = None  # Legacy localisation review.
     feedback: Literal["wrong_object"] | None = None
     # Internal fields never cross the client API.
     lease_id: str | None = None
     expires_at: datetime | None = None
     mask: Photo | None = None
+    prompt: str | None = None  # SAM concept from the initial assessment; absent on legacy records.
     request_id: str
 
     @model_validator(mode="after")

@@ -55,7 +55,6 @@ def create_app(
             images = photos or GCSPhotoStore(config)
             stack.callback(images.close)
             app.state.settings = config
-            app.state.service = AssessmentService(records, images, model)
             highlighting = highlight_provider or (
                 MuseHighlightProvider(config)
                 if config.model_provider == "muse"
@@ -67,6 +66,7 @@ def create_app(
                 CloudTasksDispatcher(config) if config.annotation_tasks_queue else None
             )
             app.state.annotations = AnnotationService(records, images, highlighting, dispatch)
+            app.state.service = AssessmentService(records, images, model, app.state.annotations)
             yield
 
     app = FastAPI(title="Home Safety AI", version="0.1.0", lifespan=lifespan)

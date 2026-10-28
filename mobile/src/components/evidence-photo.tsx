@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
 import { Image } from "expo-image";
-import { Modal, ScrollView, View, useWindowDimensions } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View } from "react-native";
 import { usePreview } from "@/hooks/preview-context";
-import { Button, Copy } from "@/components/ui";
+import { Copy } from "@/components/ui";
 import type { Photo } from "@/domain/model";
 import { roomSources } from "@/domain/samples";
 
-/** Both layers occupy one source-aspect canvas and receive exactly the same zoom. */
+/** Both layers occupy one source-aspect canvas, so the mask stays aligned. */
 export function EvidencePhoto({
   photo,
   mask,
@@ -24,10 +23,6 @@ export function EvidencePhoto({
     dimensions ? dimensions.width / dimensions.height : 1,
   );
   const [width, setWidth] = useState(300);
-  const [zoom, setZoom] = useState(1);
-  const [expanded, setExpanded] = useState(false);
-  const window = useWindowDimensions();
-  const insets = useSafeAreaInsets();
   useEffect(() => {
     let active = true;
     setSource(undefined);
@@ -52,8 +47,8 @@ export function EvidencePhoto({
     : photo.sample
       ? roomSources[photo.sample]
       : undefined;
-  const canvas = (canvasWidth: number) => (
-    <View style={{ width: canvasWidth, height: canvasWidth / ratio }}>
+  const canvas = (
+    <View style={{ width, height: width / ratio }}>
       {!!imageSource && (
         <Image
           source={imageSource}
@@ -70,7 +65,7 @@ export function EvidencePhoto({
         <Image
           source={{ uri: mask }}
           contentFit="contain"
-          accessibilityLabel="Reviewed object highlight"
+          accessibilityLabel="AI-generated highlight"
           pointerEvents="none"
           style={{ position: "absolute", width: "100%", height: "100%" }}
         />
@@ -85,55 +80,11 @@ export function EvidencePhoto({
       {error ? (
         <Copy>Photo unavailable. Your finding remains saved.</Copy>
       ) : imageSource ? (
-        canvas(width)
+        canvas
       ) : (
         <Copy>Loading saved photo…</Copy>
       )}
       <Copy kind="small">{photo.label}</Copy>
-      <Button
-        label="Zoom photo"
-        variant="secondary"
-        disabled={!imageSource || error}
-        onPress={() => {
-          setZoom(1);
-          setExpanded(true);
-        }}
-      />
-      <Modal
-        visible={expanded}
-        onRequestClose={() => setExpanded(false)}
-        animationType="none"
-      >
-        <View
-          style={{
-            flex: 1,
-            paddingTop: Math.max(insets.top, 16),
-            paddingBottom: Math.max(insets.bottom, 16),
-            gap: 12,
-            backgroundColor: "white",
-          }}
-        >
-          <Copy kind="small">
-            Scroll to inspect the photo. Photo and highlight zoom together.
-          </Copy>
-          <ScrollView style={{ flex: 1 }}>
-            <ScrollView horizontal>{canvas(window.width * zoom)}</ScrollView>
-          </ScrollView>
-          <Button
-            label="Zoom in"
-            variant="secondary"
-            disabled={zoom >= 4}
-            onPress={() => setZoom((value) => Math.min(4, value + 1))}
-          />
-          <Button
-            label="Zoom out"
-            variant="secondary"
-            disabled={zoom <= 1}
-            onPress={() => setZoom((value) => Math.max(1, value - 1))}
-          />
-          <Button label="Close photo" onPress={() => setExpanded(false)} />
-        </View>
-      </Modal>
     </View>
   );
 }

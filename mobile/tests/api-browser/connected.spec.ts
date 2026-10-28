@@ -312,20 +312,35 @@ test("real file upload, failed status write, server restart state and latest res
   await expect(page.getByText("1 of 2 handled", { exact: true })).toBeVisible();
 });
 
-test("finding highlights stay asynchronous, align in zoom, hide and report independently of checklist status", async ({
+test("eager finding highlights are only fetched, align inline, hide and report independently of checklist status", async ({
   page,
   request,
 }) => {
-  let requests = 0;
+  let posts = 0;
+  let reads = 0;
   let reported = false;
   let annotationState = "queued";
-  let job: Record<string, unknown>;
   let maskOffline = true;
   let delayNextRead = false;
   let pendingRead = false;
   let releaseRead: () => void = () => {};
+  const job = async (id: string) => {
+    const saved = await serverAssessment(page, request);
+    return {
+      id,
+      revision: "initial",
+      attempt: posts + 1,
+      photo_id: saved.photo.id,
+      photo_kind: "original",
+      width: 1200,
+      height: 800,
+      orientation: 1,
+      retryable: true,
+    };
+  };
   await page.route("**/findings/*/annotations**", async (route) => {
     const url = route.request().url();
+    const method = route.request().method();
     if (url.endsWith("/mask")) {
       if (maskOffline) {
         await route.abort();
@@ -341,38 +356,38 @@ test("finding highlights stay asynchronous, align in zoom, hide and report indep
       });
       return;
     }
-    if (delayNextRead && route.request().method() === "GET") {
+    const id = url.endsWith("/annotations")
+      ? "retried-annotation"
+      : url.split("/annotations/")[1].split("/")[0];
+    if (delayNextRead && method === "GET") {
       delayNextRead = false;
       pendingRead = true;
       await new Promise<void>((resolve) => {
         releaseRead = resolve;
       });
-      await route.fulfill({ status: 200, json: { ...job, state: "ready" } });
+      await route.fulfill({
+        status: 200,
+        json: { ...(await job(id)), state: "ready" },
+      });
       return;
     }
     if (url.endsWith("/feedback")) {
       reported = true;
       annotationState = "reported";
     }
-    if (route.request().method() === "POST" && url.endsWith("/annotations")) {
-      requests++;
-      const body = route.request().postDataJSON();
-      if (body.retry) annotationState = "queued";
-      const saved = await serverAssessment(page, request);
-      job = {
-        id: "test-annotation",
+    if (method === "GET") reads++;
+    if (method === "POST" && url.endsWith("/annotations")) {
+      posts++;
+      expect(route.request().postDataJSON()).toEqual({
         revision: "initial",
-        photo_id: saved.photo.id,
-        photo_kind: "original",
-        width: 1200,
-        height: 800,
-        orientation: 1,
-      };
+        retry: true,
+      });
+      annotationState = "queued";
     }
     await route.fulfill({
       status: annotationState === "queued" ? 202 : 200,
       json: {
-        ...job,
+        ...(await job(id)),
         state: annotationState,
         reason: reported ? "You reported the wrong object." : null,
       },
@@ -382,7 +397,14 @@ test("finding highlights stay asynchronous, align in zoom, hide and report indep
   await page.getByRole("button", { name: "Use living room sample" }).click();
   await submit(page);
   await expect(page.getByText("0 of 2 handled", { exact: true })).toBeVisible();
-  expect(requests).toBe(0);
+  // The completed assessment already lists each finding's highlight attempt.
+  const saved = await serverAssessment(page, request);
+  expect(
+    saved.findings.every(
+      (f: { annotation: { id: string } }) => f.annotation.id,
+    ),
+  ).toBe(true);
+  expect(posts + reads).toBe(0);
   await page.getByRole("button", { name: /Check the cabinet/ }).click();
   await expect(
     page.getByText("Highlight queued…", { exact: true }),
@@ -397,7 +419,7 @@ test("finding highlights stay asynchronous, align in zoom, hide and report indep
   ).toBeEnabled();
   annotationState = "ready";
   const highlight = page.getByRole("img", {
-    name: "Reviewed object highlight",
+    name: "AI-generated highlight",
     exact: true,
   });
   await expect(
@@ -408,7 +430,14 @@ test("finding highlights stay asynchronous, align in zoom, hide and report indep
   ).toHaveCount(0);
   maskOffline = false;
   await expect(highlight).toBeVisible();
-  expect(requests).toBe(1);
+  await expect(
+    page.getByText(/^AI-generated highlight · may mark the wrong object/),
+  ).toBeVisible();
+  expect(posts).toBe(0);
+  // Terminal state stops polling.
+  const settled = reads;
+  await page.waitForTimeout(2500);
+  expect(reads).toBe(settled);
   await page
     .getByRole("button", { name: "Hide highlights", exact: true })
     .click();
@@ -417,21 +446,33 @@ test("finding highlights stay asynchronous, align in zoom, hide and report indep
     .getByRole("button", { name: "Show highlights", exact: true })
     .click();
   await expect(highlight).toBeVisible();
-  await page
-    .getByRole("button", { name: "Zoom photo", exact: true })
-    .first()
-    .click();
-  await page.getByRole("button", { name: "Zoom in", exact: true }).click();
-  const zoomed = page
-    .getByRole("img", { name: "Reviewed object highlight", exact: true })
-    .last();
-  const maskBox = await zoomed.boundingBox();
+  // Inline evidence keeps photo and mask on one canvas; zoom is gone.
+  await expect(page.getByRole("button", { name: /Zoom/ })).toHaveCount(0);
+  const maskBox = await highlight.boundingBox();
   const imageBox = await page
     .getByRole("img", { name: "Original evidence photo", exact: true })
-    .last()
     .boundingBox();
   expect(maskBox).toEqual(imageBox);
-  await page.getByRole("button", { name: "Close photo", exact: true }).click();
+  // The full photo keeps its own aspect ratio inline (no cropping).
+  const natural = await page
+    .getByRole("img", { name: "Original evidence photo", exact: true })
+    .evaluate(async (node) => {
+      // expo-image renders either an <img> or a background image on web.
+      const element = [node, ...node.querySelectorAll("*")].find(
+        (child) =>
+          child instanceof HTMLImageElement ||
+          getComputedStyle(child).backgroundImage.startsWith("url("),
+      ) as HTMLElement;
+      const source =
+        element instanceof HTMLImageElement
+          ? element.src
+          : getComputedStyle(element).backgroundImage.slice(5, -2);
+      const image = new Image();
+      image.src = source;
+      await image.decode();
+      return image.naturalWidth / image.naturalHeight;
+    });
+  expect(imageBox!.width / imageBox!.height).toBeCloseTo(natural, 1);
   delayNextRead = true;
   await page.evaluate(() =>
     document.dispatchEvent(new Event("visibilitychange")),
@@ -448,7 +489,7 @@ test("finding highlights stay asynchronous, align in zoom, hide and report indep
   const oldRead = page.waitForResponse(
     (response) =>
       response.request().method() === "GET" &&
-      response.url().endsWith("/test-annotation"),
+      /\/annotations\/[^/]+$/.test(response.url()),
   );
   releaseRead();
   await oldRead;
@@ -468,15 +509,18 @@ test("finding highlights stay asynchronous, align in zoom, hide and report indep
       (f: { status: string }) => f.status === "open",
     ),
   ).toBe(true);
+  // Restarting only fetches the saved attempt.
   await page.reload();
   await expect(
     page.getByText("You reported the wrong object.", { exact: true }),
   ).toBeVisible();
   await expect(highlight).toHaveCount(0);
+  expect(posts).toBe(0);
   await page
     .getByRole("button", { name: "Retry highlight", exact: true })
     .click();
   await expect(
     page.getByText("Highlight queued…", { exact: true }),
   ).toBeVisible();
+  expect(posts).toBe(1);
 });

@@ -1,5 +1,8 @@
 # Dispatch finding highlights with Cloud Tasks and Firestore leases
 
+> Amended by [ADR 0003](0003-eager-independent-highlight-attempts.md): attempts start at
+> assessment completion and are claimed independently, not one per assessment.
+
 Finding highlights run independently of safety analysis and mobile navigation.
 Cloud Tasks delivers authenticated HTTP work to Cloud Run; an independent Cloud
 Scheduler sweep recovers persisted dispatch intent. Firestore is authoritative:

@@ -19,6 +19,12 @@ Assess the initial room photo. Return a short qualified summary and up to 12 dis
 ordered by severity. Where important uncertainty needs clarification, optionally request ONE
 safe targeted photo OR focused text answer per finding using follow_up; otherwise use null.
 Never ask the user to climb, move heavy objects or approach a dangerous situation for a photo.
+For each finding, set segmentation_prompt to a short noun phrase (at most a few words) naming
+ONE main visible object that supports the finding, preferably the object the recommended action
+concerns: for curtains near a heater, use "curtains". Add a visible color or type only when it
+distinguishes similar objects, e.g. "white extension cord". Never include coordinates, positions,
+several objects, lists, negations, commands, or explanations. Use null when no single suitable
+visible object exists. This field only locates evidence and is never shown as safety advice.
 """
 )
 

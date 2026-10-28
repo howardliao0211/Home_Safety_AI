@@ -2,7 +2,15 @@
 
 import asyncio
 import multiprocessing
+import threading
 import time
+
+# Concurrent attempts share one instance; cap simultaneous decode processes
+# (CPU and memory) while each attempt keeps its own deadline.
+SLOTS = threading.BoundedSemaphore(4)
+# multiprocessing reaps every child on start(); concurrent attempts would race on
+# waitpid, so process start and teardown are serialised.
+LIFECYCLE = threading.Lock()
 
 
 def remaining(deadline):
@@ -23,28 +31,42 @@ def _compute(sender, function, arguments):
 
 
 async def bounded_cpu(function, *arguments, deadline):
+    # Non-blocking polling cannot leak a slot when the attempt is cancelled.
+    while not SLOTS.acquire(blocking=False):
+        await asyncio.sleep(min(0.01, remaining(deadline)))
+    try:
+        return await _bounded_cpu(function, arguments, deadline)
+    finally:
+        SLOTS.release()
+
+
+async def _bounded_cpu(function, arguments, deadline):
     context = multiprocessing.get_context("spawn")
     receiver, sender = context.Pipe(duplex=False)
     process = context.Process(target=_compute, args=(sender, function, arguments), daemon=True)
-    process.start()
+    with LIFECYCLE:
+        process.start()
     sender.close()
     try:
+        # A child that dies closes the pipe, so poll() also wakes on interruption.
         while not receiver.poll():
-            remaining(deadline)
-            if not process.is_alive():
-                raise ValueError("Mask computation interrupted")
             await asyncio.sleep(min(0.01, remaining(deadline)))
-        succeeded, value = receiver.recv()
+        try:
+            succeeded, value = receiver.recv()
+        except EOFError:
+            raise ValueError("Mask computation interrupted") from None
         remaining(deadline)
         if not succeeded:
             raise ValueError("Invalid mask computation")
         return value
     finally:
         receiver.close()
-        if process.is_alive():
-            process.terminate()
-        process.join(timeout=0.1)
-        if process.is_alive():
-            process.kill()
+        with LIFECYCLE:
+            if process.is_alive():
+                process.terminate()
             process.join(timeout=0.1)
-        process.close()
+            if process.is_alive():
+                process.kill()
+                # SIGKILL cannot be ignored; reap it so close() never sees a live child.
+                process.join()
+            process.close()

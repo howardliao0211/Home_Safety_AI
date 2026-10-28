@@ -105,6 +105,7 @@ def assessment_result(follow_up_kind="text"):
             {
                 **content(),
                 "follow_up": {"kind": follow_up_kind, "question": "Is this route used at night?"},
+                "segmentation_prompt": "black power cable",
             }
         ],
     }

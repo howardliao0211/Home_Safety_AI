@@ -8,6 +8,19 @@ import type { Annotation, Assessment, Finding } from "@/domain/model";
 import { Button, Copy } from "@/components/ui";
 import { EvidencePhoto } from "@/components/evidence-photo";
 
+const ACTIVE = ["queued", "processing"];
+
+function newer(a: Annotation | null, b: Annotation | null) {
+  if (!a) return b;
+  if (!b) return a;
+  return (b.attempt || 0) > (a.attempt || 0) ? b : a;
+}
+
+/**
+ * The backend starts highlight work when the assessment completes. Opening a
+ * finding only reads that saved attempt; it never creates or retries model work
+ * except through the explicit Retry button.
+ */
 export function FindingHighlight({
   assessment,
   finding,
@@ -19,14 +32,16 @@ export function FindingHighlight({
 }) {
   const { annotationClient, refreshAssessment } = usePreview();
   const revision = historical?.revision || finding.contentRevision || "initial";
-  const [annotation, setAnnotation] = useState<Annotation | null>(
-    historical || finding.annotation || null,
-  );
+  const saved = historical || finding.annotation || null;
+  const [annotation, setAnnotation] = useState<Annotation | null>(saved);
   const [mask, setMask] = useState<string>();
   const [hidden, setHidden] = useState(false);
   const [error, setError] = useState<string>();
   const [acting, setActing] = useState(false);
   const action = useRef(false);
+  const latest = useRef<Annotation | null>(saved);
+  latest.current =
+    historical || newer(latest.current, finding.annotation || null);
   const current =
     annotation?.revision === revision || annotation?.supported === false
       ? annotation
@@ -36,6 +51,7 @@ export function FindingHighlight({
   const apply = useCallback(
     async (value: Annotation, token: number) => {
       if (token !== generation.current) return false;
+      if (value.id) latest.current = value;
       setAnnotation(value);
       setError(undefined);
       setMask(undefined);
@@ -67,32 +83,38 @@ export function FindingHighlight({
   useFocusEffect(
     useCallback(() => {
       const token = ++generation.current;
-      let timer: ReturnType<typeof setTimeout>;
-      let last: Annotation | null = historical || null;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let last = latest.current;
       setHidden(false);
       setMask(undefined);
       let checking = false;
       let assetFailed = false;
       let readFailed = false;
+      const stop = () => {
+        clearTimeout(timer);
+        timer = undefined;
+      };
       const check = async () => {
-        if (!apiEnabled || token !== generation.current || checking || action.current) return;
+        // One read at a time per attempt, and only while the screen is visible.
+        if (
+          !apiEnabled ||
+          !last?.id ||
+          token !== generation.current ||
+          checking ||
+          action.current ||
+          AppState.currentState !== "active"
+        )
+          return;
+        stop();
         checking = true;
         try {
           readFailed = false;
-          if (last?.state === "ready" && assetFailed) {
+          if (last.state === "ready" && assetFailed) {
             assetFailed = !(await apply(last, token));
             return;
           }
           const api = await annotationClient();
-          last = historical?.id
-            ? await api.annotation(assessment.id, finding.id, historical.id)
-            : last?.id
-              ? await api.annotation(assessment.id, finding.id, last.id)
-              : await api.requestAnnotation(
-                  assessment.id,
-                  finding.id,
-                  revision,
-                );
+          last = await api.annotation(assessment.id, finding.id, last.id!);
           assetFailed = !(await apply(last, token));
         } catch (e) {
           if (token !== generation.current) return;
@@ -110,21 +132,21 @@ export function FindingHighlight({
           checking = false;
           if (
             token === generation.current &&
-            (!last ||
-              assetFailed ||
-              readFailed ||
-              ["queued", "processing"].includes(last.state))
+            AppState.currentState === "active" &&
+            (assetFailed || readFailed || ACTIVE.includes(last?.state || ""))
           )
             timer = setTimeout(() => void check(), 2000);
         }
       };
       void check();
       const listener = AppState.addEventListener("change", (state) => {
+        // Saved state is authoritative after inactivity; work never paused.
         if (state === "active") void check();
+        else stop();
       });
       return () => {
         generation.current++;
-        clearTimeout(timer);
+        stop();
         listener.remove();
       };
     }, [assessment.id, finding.id, revision, historical?.id, pollAttempt]),
@@ -141,16 +163,11 @@ export function FindingHighlight({
       const result =
         report && current?.id
           ? await api.reportAnnotation(assessment.id, finding.id, current.id)
-          : await api.requestAnnotation(
-              assessment.id,
-              finding.id,
-              revision,
-              true,
-            );
+          : await api.retryAnnotation(assessment.id, finding.id, revision);
       if (token !== generation.current) return;
       setHidden(false);
       await apply(result, token);
-      // Restart polling for the new attempt; the operation is owned by the server.
+      // Resume reading the new attempt; the operation is owned by the server.
       if (!report) setPollAttempt((value) => value + 1);
     } catch (e) {
       if (token === generation.current)
@@ -175,6 +192,17 @@ export function FindingHighlight({
           : sourcePhoto.label,
       }
     : assessment.photo;
+  const status = !current
+    ? revision === "initial"
+      ? "No highlight is available for this finding."
+      : "Highlights are made only for the original assessment findings."
+    : current.state === "queued"
+      ? "Highlight queued…"
+      : current.state === "processing"
+        ? "Preparing highlight…"
+        : current.state === "ready"
+          ? "AI-generated highlight · may mark the wrong object · not safety verification"
+          : current.reason || "Highlight unavailable.";
   return (
     <View style={{ gap: 10 }}>
       <EvidencePhoto
@@ -198,14 +226,7 @@ export function FindingHighlight({
       ) : (
         <>
           <Copy kind="small" accessibilityLiveRegion="polite">
-            {current?.state === "queued"
-              ? "Highlight queued…"
-              : current?.state === "processing"
-                ? "Preparing highlight…"
-                : current?.reason ||
-                  (current?.state === "ready"
-                    ? "Reviewed object location · not safety verification"
-                    : "Requesting highlight…")}
+            {status}
           </Copy>
           {!!error && <Copy kind="small">{error}</Copy>}
           {current?.state === "ready" && (
@@ -223,7 +244,7 @@ export function FindingHighlight({
               />
             </>
           )}
-          {!!error && current?.state === "ready" && (
+          {!!error && (
             <Button
               label="Reload highlight"
               variant="secondary"
@@ -231,12 +252,10 @@ export function FindingHighlight({
             />
           )}
           {!historical &&
-            ((error && current?.state !== "ready") ||
-              (current &&
-                ["failed", "unavailable", "reported"].includes(
-                  current.state,
-                ))) &&
-            current?.supported !== false && (
+            current &&
+            ["failed", "unavailable", "reported"].includes(current.state) &&
+            current.retryable !== false &&
+            current.supported !== false && (
               <Button
                 label="Retry highlight"
                 variant="secondary"

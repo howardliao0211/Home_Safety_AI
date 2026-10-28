@@ -38,7 +38,7 @@ def test_queued_highlight_survives_api_restart_local_worker_and_asset_deletion(
         )
         a = client.post(base + "/analyze").json()
         annotations = base + f"/findings/{a['findings'][0]['id']}/annotations"
-        job = client.post(annotations, json={"revision": "initial"}).json()
+        job = a["findings"][0]["annotation"]
         assert job["state"] == "queued" and highlighting.calls == []
     with TestClient(
         create_app(config, provider=StubProvider(), highlight_provider=highlighting)
@@ -52,7 +52,7 @@ def test_queued_highlight_survives_api_restart_local_worker_and_asset_deletion(
             assert ready["state"] == "ready"
             assert client.get(annotations + "/" + job["id"] + "/mask").status_code == 200
             service.work(device, aid, job["id"])
-            assert highlighting.calls == ["select", "segment", "review"]
+            assert highlighting.calls == ["black power cable"]
             assert client.delete(base).status_code == 204
             assert not any(asset[1] == aid for asset in service.photos.annotation_assets())
             # A worker crash immediately after a deletion-racing upload must also

@@ -271,7 +271,9 @@ class Deployer:
             "--ingress=all",
             "--cpu=1",
             "--memory=2Gi",
-            "--concurrency=2",
+            # 8 x 2 instances admits one assessment's 12 overlapping highlight
+            # attempts plus API requests; mask decoding is capped per instance.
+            "--concurrency=8",
             "--min=0",
             "--max=2",
             "--timeout=300s",

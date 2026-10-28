@@ -61,9 +61,14 @@ def submission_in(finding: Finding, submission_id: str) -> Submission:
 
 class AssessmentService:
     def __init__(
-        self, repository: AssessmentRepository, photos: PhotoStore, provider: ModelProvider
+        self,
+        repository: AssessmentRepository,
+        photos: PhotoStore,
+        provider: ModelProvider,
+        annotations=None,
     ):
         self.repository, self.photos, self.provider = repository, photos, provider
+        self.annotations = annotations
 
     def get(self, device_id: str, assessment_id: str) -> Assessment:
         return require(self.repository.get(device_id, assessment_id))
@@ -336,22 +341,30 @@ class AssessmentService:
                     if current_operation.kind == "follow-up":
                         current_finding.follow_up.state = "answered"
                 else:
+                    proposed = sorted(
+                        result.findings,
+                        key=lambda item: {"High": 0, "Medium": 1, "Low": 2}[item.severity],
+                    )
                     current.summary = result.summary
                     current.findings = [
                         Finding(
-                            **item.model_dump(exclude={"follow_up"}),
+                            **item.model_dump(exclude={"follow_up", "segmentation_prompt"}),
                             follow_up=FollowUp(**item.follow_up.model_dump())
                             if item.follow_up
                             else None,
                         )
-                        for item in sorted(
-                            result.findings,
-                            key=lambda item: {"High": 0, "Medium": 1, "Low": 2}[item.severity],
-                        )
+                        for item in proposed
                     ]
+                    if self.annotations:
+                        # Same commit as the findings, so a crash cannot lose highlight work.
+                        self.annotations.seed(current, proposed, request_id)
                 current.lease = None
 
-            return self._mutate(device_id, assessment_id, complete, lease_id=lease.id)
+            completed = self._mutate(device_id, assessment_id, complete, lease_id=lease.id)
+            if self.annotations and not submission_id:
+                # Enqueue failure leaves durable intent for the recovery sweep.
+                self.annotations.dispatch(device_id, assessment_id)
+            return completed
         except Exception as exc:
             if isinstance(exc, AppError) and exc.code in {"superseded", "not_found", "deleting"}:
                 raise
