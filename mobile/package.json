@@ -40,7 +40,7 @@
     "android": "node ../scripts/expo.cjs start --android",
     "web": "node ../scripts/expo.cjs start --web",
     "typecheck": "tsc --noEmit",
-    "start:tunnel": "node ../scripts/expo.cjs start --tunnel",
+    "start:tunnel": "node ../scripts/expo.cjs start --tunnel ngrok",
     "test": "tsx --test tests/*.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:api": "playwright test -c playwright.api.config.ts",
