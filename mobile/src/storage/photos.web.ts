@@ -1,5 +1,5 @@
 import type { Photo } from "../domain/model";
-export async function retainPhoto(photo: Photo): Promise<Photo> {
+async function retainPhoto(photo: Photo): Promise<Photo> {
   if (!photo.uri || photo.sample || photo.uri.startsWith("data:")) return photo;
   const response = await fetch(photo.uri);
   if (!response.ok)
@@ -16,6 +16,10 @@ export async function retainPhoto(photo: Photo): Promise<Photo> {
   });
   return { ...photo, uri };
 }
-export async function cleanPhotos(_retained: Photo[]) {
+async function cleanPhotos(_retained: Photo[]) {
   /* Photos are stored in the state transaction. */
+}
+
+export function createPhotoStorage(_scope: string) {
+  return { retainPhoto, cleanPhotos, removeLegacyPhotos: async () => {} };
 }

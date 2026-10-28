@@ -305,6 +305,7 @@ export function PhotoView({
   return (
     <View style={{ gap: 8 }}>
       <Image
+        cachePolicy="none"
         key={photo.id}
         source={source}
         accessibilityLabel={photo.label}

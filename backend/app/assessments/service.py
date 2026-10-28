@@ -70,13 +70,13 @@ class AssessmentService:
         self.repository, self.photos, self.provider = repository, photos, provider
         self.annotations = annotations
 
-    def get(self, device_id: str, assessment_id: str) -> Assessment:
-        return require(self.repository.get(device_id, assessment_id))
+    def get(self, owner_uid: str, assessment_id: str) -> Assessment:
+        return require(self.repository.get(owner_uid, assessment_id))
 
-    def latest(self, device_id: str) -> Assessment:
-        return require(self.repository.latest(device_id))
+    def latest(self, owner_uid: str) -> Assessment:
+        return require(self.repository.latest(owner_uid))
 
-    def _mutate(self, device_id, assessment_id, change, *, lease_id=None):
+    def _mutate(self, owner_uid, assessment_id, change, *, lease_id=None):
         def apply(previous):
             assessment = require(previous)
             if lease_id:
@@ -92,11 +92,11 @@ class AssessmentService:
                 assessment.updated_at = now()
             return assessment
 
-        return self.repository.mutate(device_id, assessment_id, apply)
+        return self.repository.mutate(owner_uid, assessment_id, apply)
 
     def _upload(
         self,
-        device_id,
+        owner_uid,
         assessment_id,
         photo,
         data,
@@ -107,7 +107,7 @@ class AssessmentService:
     ):
         try:
             if photo and not photo.uploaded:
-                self.photos.put(device_id, assessment_id, photo, data)
+                self.photos.put(owner_uid, assessment_id, photo, data)
 
             def finish(assessment):
                 target_photo = (
@@ -119,11 +119,11 @@ class AssessmentService:
                     target_photo.uploaded = True
                 assessment.lease = None
 
-            return self._mutate(device_id, assessment_id, finish, lease_id=lease_id)
+            return self._mutate(owner_uid, assessment_id, finish, lease_id=lease_id)
         except Exception as exc:
             if isinstance(exc, AppError) and exc.code in {"superseded", "not_found", "deleting"}:
                 raise
-            self._release(device_id, assessment_id, lease_id)
+            self._release(owner_uid, assessment_id, lease_id)
             logger.error(
                 "photo_upload_failed assessment_id=%s finding_id=%s exception_type=%s",
                 assessment_id,
@@ -134,12 +134,12 @@ class AssessmentService:
                 503, "upload_failed", "Photo upload failed. Resend the same input with the same ID."
             ) from None
 
-    def _release(self, device_id, assessment_id, lease_id):
+    def _release(self, owner_uid, assessment_id, lease_id):
         self._mutate(
-            device_id, assessment_id, lambda a: setattr(a, "lease", None), lease_id=lease_id
+            owner_uid, assessment_id, lambda a: setattr(a, "lease", None), lease_id=lease_id
         )
 
-    def create(self, device_id, assessment_id, photo, data, profiles, household_context):
+    def create(self, owner_uid, assessment_id, photo, data, profiles, household_context):
         digest = fingerprint(
             {"photo": photo.sha256, "profiles": profiles, "context": household_context}
         )
@@ -158,7 +158,7 @@ class AssessmentService:
             else:
                 assessment = Assessment(
                     id=assessment_id,
-                    device_id=device_id,
+                    owner_uid=owner_uid,
                     photo=photo,
                     profiles=profiles,
                     household_context=household_context,
@@ -167,13 +167,13 @@ class AssessmentService:
             assessment.lease = lease
             return assessment
 
-        assessment = self.repository.mutate(device_id, assessment_id, reserve)
+        assessment = self.repository.mutate(owner_uid, assessment_id, reserve)
         if assessment.photo.uploaded:
             return assessment
-        return self._upload(device_id, assessment_id, assessment.photo, data, lease.id)
+        return self._upload(owner_uid, assessment_id, assessment.photo, data, lease.id)
 
     def add_submission(
-        self, device_id, assessment_id, finding_id, submission_id, kind, text, photo, data
+        self, owner_uid, assessment_id, finding_id, submission_id, kind, text, photo, data
     ):
         digest = fingerprint({"kind": kind, "text": text, "photo": photo.sha256 if photo else None})
         lease = Lease(id=new_id(), expires_at=now() + timedelta(seconds=LEASE_SECONDS))
@@ -222,10 +222,10 @@ class AssessmentService:
                 )
             assessment.lease = lease
 
-        assessment = self._mutate(device_id, assessment_id, reserve)
+        assessment = self._mutate(owner_uid, assessment_id, reserve)
         stored = submission_in(finding_in(assessment, finding_id), submission_id)
         return self._upload(
-            device_id,
+            owner_uid,
             assessment_id,
             stored.photo,
             data,
@@ -234,16 +234,16 @@ class AssessmentService:
             submission_id=submission_id,
         )
 
-    def patch_finding(self, device_id, assessment_id, finding_id, patch: FindingPatch):
+    def patch_finding(self, owner_uid, assessment_id, finding_id, patch: FindingPatch):
         def change(assessment):
             finding = finding_in(assessment, finding_id)
             finding.status = patch.status
             if patch.note is not None:
                 finding.note = patch.note
 
-        return self._mutate(device_id, assessment_id, change)
+        return self._mutate(owner_uid, assessment_id, change)
 
-    def skip_follow_up(self, device_id, assessment_id, finding_id):
+    def skip_follow_up(self, owner_uid, assessment_id, finding_id):
         def change(assessment):
             finding = finding_in(assessment, finding_id)
             if not finding.follow_up or any(s.kind == "follow-up" for s in finding.submissions):
@@ -252,9 +252,9 @@ class AssessmentService:
                 raise AppError(409, "follow_up_unavailable", "This follow-up was already answered.")
             finding.follow_up.state = "skipped"
 
-        return self._mutate(device_id, assessment_id, change)
+        return self._mutate(owner_uid, assessment_id, change)
 
-    def analyze(self, device_id, assessment_id, request_id, finding_id=None, submission_id=None):
+    def analyze(self, owner_uid, assessment_id, request_id, finding_id=None, submission_id=None):
         lease = Lease(id=new_id(), expires_at=now() + timedelta(seconds=LEASE_SECONDS))
 
         def target(assessment):
@@ -283,7 +283,7 @@ class AssessmentService:
             operation.request_id = request_id
             operation.provider, operation.model = self.provider.name, self.provider.model
 
-        assessment = self._mutate(device_id, assessment_id, claim)
+        assessment = self._mutate(owner_uid, assessment_id, claim)
         if target(assessment).status == "complete":
             return assessment
         operation_name = "assess" if not submission_id else target(assessment).kind
@@ -292,7 +292,7 @@ class AssessmentService:
                 "profiles": assessment.profiles,
                 "household_context": assessment.household_context,
             }
-            images = [self._image(device_id, assessment, assessment.photo, "Initial room photo")]
+            images = [self._image(owner_uid, assessment, assessment.photo, "Initial room photo")]
             schema = AssessmentResult
             if submission_id:
                 finding = finding_in(assessment, finding_id)
@@ -313,7 +313,7 @@ class AssessmentService:
                 )
                 if submission.photo:
                     images.append(
-                        self._image(device_id, assessment, submission.photo, "New linked photo")
+                        self._image(owner_uid, assessment, submission.photo, "New linked photo")
                     )
                 schema = RevisionResult
             raw = self.provider.generate(
@@ -360,10 +360,10 @@ class AssessmentService:
                         self.annotations.seed(current, proposed, request_id)
                 current.lease = None
 
-            completed = self._mutate(device_id, assessment_id, complete, lease_id=lease.id)
+            completed = self._mutate(owner_uid, assessment_id, complete, lease_id=lease.id)
             if self.annotations and not submission_id:
                 # Enqueue failure leaves durable intent for the recovery sweep.
-                self.annotations.dispatch(device_id, assessment_id)
+                self.annotations.dispatch(owner_uid, assessment_id)
             return completed
         except Exception as exc:
             if isinstance(exc, AppError) and exc.code in {"superseded", "not_found", "deleting"}:
@@ -412,25 +412,25 @@ class AssessmentService:
                 operation.error = message
                 current.lease = None
 
-            self._mutate(device_id, assessment_id, fail, lease_id=lease.id)
+            self._mutate(owner_uid, assessment_id, fail, lease_id=lease.id)
             raise AppError(502, code, message) from None
 
-    def _image(self, device_id, assessment, photo, label):
+    def _image(self, owner_uid, assessment, photo, label):
         return ImageInput(
-            label, photo.content_type, self.photos.get(device_id, assessment.id, photo)
+            label, photo.content_type, self.photos.get(owner_uid, assessment.id, photo)
         )
 
-    def get_photo(self, device_id, assessment_id, photo_id):
-        assessment = self.get(device_id, assessment_id)
+    def get_photo(self, owner_uid, assessment_id, photo_id):
+        assessment = self.get(owner_uid, assessment_id)
         candidates = [assessment.photo] + [
             s.photo for f in assessment.findings for s in f.submissions if s.photo
         ]
         photo = next((p for p in candidates if p.id == photo_id and p.uploaded), None)
         if not photo:
             raise AppError(404, "not_found", "Photo not found.")
-        return photo, self.photos.get(device_id, assessment_id, photo)
+        return photo, self.photos.get(owner_uid, assessment_id, photo)
 
-    def delete(self, device_id, assessment_id):
+    def delete(self, owner_uid, assessment_id):
         lease = Lease(id=new_id(), expires_at=now() + timedelta(seconds=LEASE_SECONDS))
 
         def tombstone(previous):
@@ -447,11 +447,11 @@ class AssessmentService:
             previous.lease = lease
             return previous
 
-        assessment = self.repository.mutate(device_id, assessment_id, tombstone)
+        assessment = self.repository.mutate(owner_uid, assessment_id, tombstone)
         if assessment is None:
-            return
+            raise AppError(404, "not_found", "Assessment not found.")
         try:
-            self.photos.delete_assessment(device_id, assessment_id)
+            self.photos.delete_assessment(owner_uid, assessment_id)
         except Exception as exc:
 
             def unlock(previous):
@@ -460,7 +460,7 @@ class AssessmentService:
                     current.lease = None
                 return current
 
-            self.repository.mutate(device_id, assessment_id, unlock)
+            self.repository.mutate(owner_uid, assessment_id, unlock)
             logger.error(
                 "delete_failed assessment_id=%s exception_type=%s",
                 assessment_id,
@@ -478,4 +478,4 @@ class AssessmentService:
                 raise AppError(409, "superseded", "Deletion was superseded. Retry DELETE.")
             return None
 
-        self.repository.mutate(device_id, assessment_id, finish)
+        self.repository.mutate(owner_uid, assessment_id, finish)

@@ -4,8 +4,10 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
 
+from app.accounts import AccountDeletion
 from app.annotations.provider import MuseHighlightProvider
 from app.annotations.service import AnnotationService
+from app.auth import FirebaseIdentity
 from app.config import Settings
 from app.storage.photos import GCSPhotoStore
 from app.storage.repository import FirestoreRepository
@@ -50,18 +52,26 @@ def main():
     settings = Settings()
     if settings.environment != "local":
         raise SystemExit("Use Cloud Tasks in production.")
-    if settings.model_provider != "muse" or not settings.muse_segmentation_model.strip():
-        raise SystemExit("Configure MUSE and MUSE_SEGMENTATION_MODEL before running the worker.")
     records, photos = FirestoreRepository(settings), GCSPhotoStore(settings)
-    worker = LocalWorker(AnnotationService(records, photos, MuseHighlightProvider(settings)))
+    identity = FirebaseIdentity(settings)
+    accounts = AccountDeletion(records, photos, identity)
+    photos.account_guard = records.accounts.require_active
+    provider = (
+        MuseHighlightProvider(settings)
+        if settings.model_provider == "muse" and settings.muse_segmentation_model.strip()
+        else None
+    )
+    worker = LocalWorker(AnnotationService(records, photos, provider))
     try:
         while True:
+            accounts.recover()
             worker.tick()
             time.sleep(1)
     except KeyboardInterrupt:
         pass
     finally:
         worker.close()
+        identity.close()
         records.close()
         photos.close()
 

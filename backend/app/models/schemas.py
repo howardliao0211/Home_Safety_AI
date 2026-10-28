@@ -186,7 +186,7 @@ class Lease(StrictModel):
 
 class Assessment(Operation):
     id: str
-    device_id: str
+    owner_uid: str
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)
     photo: Photo

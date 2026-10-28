@@ -7,16 +7,24 @@ import {
 import path from "node:path";
 
 const backend = "http://127.0.0.1:8001";
-const token = "browser-integration-token";
+async function session(page: Page) {
+  return page.evaluate(() => {
+    const key = Object.keys(sessionStorage).find((key) =>
+      key.startsWith("firebase:authUser:"),
+    );
+    return key ? JSON.parse(sessionStorage.getItem(key)!) : null;
+  });
+}
 async function deviceId(page: Page) {
-  return (await page.evaluate(() =>
-    localStorage.getItem("home-safety-device-id-v1"),
-  ))!;
+  return (await session(page))?.uid;
+}
+async function bearer(page: Page) {
+  return "Bearer " + (await session(page))?.stsTokenManager.accessToken;
 }
 async function serverAssessment(page: Page, request: APIRequestContext) {
   const response = await request.get(backend + "/v1/assessments/latest", {
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: await bearer(page),
       "X-Device-ID": await deviceId(page),
     },
   });
@@ -35,17 +43,37 @@ async function start(page: Page) {
     .getByRole("button", { name: "Start with a room", exact: true })
     .click();
 }
-test.beforeEach(async ({ request }) => {
+test.beforeEach(async ({ page, request }) => {
+  const email = `${crypto.randomUUID()}@example.test`;
+  const endpoint = "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/";
+  const signed = await request.post(endpoint + "accounts:signUp?key=local", {
+    data: { email, password: "Strong-password-123", returnSecureToken: true },
+  });
+  const user = await signed.json();
+  const verified = await request.post(
+    endpoint + "projects/home-safety-local/accounts:update",
+    {
+      headers: { Authorization: "Bearer owner" },
+      data: { localId: user.localId, emailVerified: true },
+    },
+  );
+  expect(verified.ok()).toBeTruthy();
+  await page.goto("/");
+  await page.getByRole("textbox", { name: "Email", exact: true }).fill(email);
+  await page
+    .getByLabel("Password", { exact: true })
+    .fill("Strong-password-123");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Start with a room", exact: true }),
+  ).toBeVisible();
   await request.post(backend + "/__test/control", {
     data: { fail_initial: 0, fail_revision: 0 },
   });
 });
 test.afterEach(async ({ page, request }) => {
-  const device = await page
-    .evaluate(() => localStorage.getItem("home-safety-device-id-v1"))
-    .catch(() => null);
-  if (!device) return;
-  const headers = { Authorization: `Bearer ${token}`, "X-Device-ID": device };
+  if (!(await session(page))) return;
+  const headers = { Authorization: await bearer(page) };
   for (let i = 0; i < 5; i += 1) {
     const latest = await request.get(backend + "/v1/assessments/latest", {
       headers,
@@ -100,7 +128,7 @@ test("connected lifecycle: upload, retained failures, retry, cache-free restore,
     });
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction("preview", "readwrite");
-      tx.objectStore("preview").delete("state-api-v1:http://127.0.0.1:8001");
+      tx.objectStore("preview").clear();
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -192,7 +220,10 @@ test("connected lifecycle: upload, retained failures, retry, cache-free restore,
   await expect(
     page.getByRole("button", { name: "Start with a room", exact: true }),
   ).toBeVisible();
-  const headers = { Authorization: `Bearer ${token}`, "X-Device-ID": identity };
+  const headers = {
+    Authorization: await bearer(page),
+    "X-Device-ID": identity,
+  };
   expect(
     (
       await request.get(backend + "/v1/assessments/" + assessmentId, {
@@ -210,31 +241,10 @@ test("connected lifecycle: upload, retained failures, retry, cache-free restore,
   ).toBe(404);
 });
 
-test("connection/auth failures stay visible and never become preview results", async ({
+test("network failures retain the session and retry without preview fallback", async ({
   page,
 }) => {
-  await page.route(backend + "/v1/assessments/latest", (route) =>
-    route.fulfill({
-      status: 401,
-      headers: { "Access-Control-Allow-Origin": "http://127.0.0.1:8082" },
-      json: {
-        error: {
-          message: "The demo token was rejected.",
-          code: "unauthorized",
-        },
-      },
-    }),
-  );
-  await page.goto("/");
-  await expect(
-    page.getByText("The demo token was rejected.", { exact: true }),
-  ).toBeVisible();
   const identity = await deviceId(page);
-  await page.unroute(backend + "/v1/assessments/latest");
-  await page.getByRole("button", { name: "Retry connecting" }).click();
-  await expect(
-    page.getByRole("button", { name: "Start with a room", exact: true }),
-  ).toBeVisible();
   await page.route(backend + "/v1/assessments/latest", (route) =>
     route.abort(),
   );

@@ -127,22 +127,38 @@ export class ApiError extends Error {
 
 export class BackendClient {
   constructor(
-    private config: { baseUrl: string; demoToken: string; deviceId: string },
+    private config: {
+      baseUrl: string;
+      getToken: () => Promise<string>;
+      onAuthError?: (error: ApiError) => void | Promise<void>;
+    },
     private appendPhoto: (form: FormData, photo: Photo) => Promise<void>,
     private fetcher: typeof fetch = fetch,
   ) {}
 
+  private disposed = false;
+  private pending = new Set<AbortController>();
+  dispose() {
+    this.disposed = true;
+    this.pending.forEach((controller) => controller.abort());
+    this.pending.clear();
+  }
+  private assertActive() {
+    if (this.disposed) throw new Error("The account session has changed.");
+  }
   private async request(
     path: string,
     init: RequestInit = {},
   ): Promise<Response> {
+    this.assertActive();
     const abort = new AbortController();
+    this.pending.add(abort);
     const timer = setTimeout(() => abort.abort(), 310_000);
     try {
       const headers = new Headers(init.headers);
-      headers.set("X-Device-ID", this.config.deviceId);
-      if (this.config.demoToken)
-        headers.set("Authorization", `Bearer ${this.config.demoToken}`);
+      const token = await this.config.getToken();
+      this.assertActive();
+      headers.set("Authorization", `Bearer ${token}`);
       // Browser fetch rejects a BackendClient instance as its receiver.
       const fetcher = this.fetcher;
       const response = await fetcher(this.config.baseUrl + path, {
@@ -150,14 +166,18 @@ export class BackendClient {
         headers,
         signal: abort.signal,
       });
+      this.assertActive();
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        throw new ApiError(
+        const error = new ApiError(
           body?.error?.message ||
             `The request failed (HTTP ${response.status}).`,
           response.status,
           body?.error?.code || "request_failed",
         );
+        if (error.status === 401 || error.code === "account_deleting")
+          await this.config.onAuthError?.(error);
+        throw error;
       }
       return response;
     } catch (error) {
@@ -169,6 +189,7 @@ export class BackendClient {
       );
     } finally {
       clearTimeout(timer);
+      this.pending.delete(abort);
     }
   }
 
@@ -336,6 +357,7 @@ export class BackendClient {
   }
   private async dataUrl(response: Response, contentType: string) {
     const bytes = new Uint8Array(await response.arrayBuffer());
+    this.assertActive();
     const alphabet =
       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let encoded = "";

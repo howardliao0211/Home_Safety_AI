@@ -10,7 +10,6 @@ import base64
 import json
 import os
 import re
-import secrets
 import subprocess
 import sys
 import tempfile
@@ -44,7 +43,6 @@ class Config:
     photos_bucket: str
     database_id: str
     groq_secret: str
-    demo_secret: str
     muse_secret: str = ""
     annotation_tasks_queue: str = ""
     annotation_worker_url: str = ""
@@ -122,9 +120,7 @@ class Deployer:
         return version
 
     def secret_value(self, secret, version):
-        value = self.gcloud(
-            "secrets", "versions", "access", version, f"--secret={secret}"
-        )
+        value = self.gcloud("secrets", "versions", "access", version, f"--secret={secret}")
         if not value:
             raise DeploymentError(f"Secret {secret} is empty.")
         self.sensitive.add(value)
@@ -143,12 +139,10 @@ class Deployer:
         )
         return name.rsplit("/", 1)[-1]
 
-    def publish_secrets(self, env_file, *, rotate_demo_token=False, provider="groq"):
+    def publish_secrets(self, env_file, *, provider="groq"):
         values = dotenv_values(env_file)
         key_name = "MUSE_API_KEY" if provider == "muse" else "GROQ_API_KEY"
-        secret_name = (
-            self.config.muse_secret if provider == "muse" else self.config.groq_secret
-        )
+        secret_name = self.config.muse_secret if provider == "muse" else self.config.groq_secret
         key = os.environ.get(key_name, values.get(key_name))
         if not key or not key.strip():
             raise DeploymentError(
@@ -156,38 +150,40 @@ class Deployer:
             )
         version = self.add_secret(secret_name, key)
         print(f"{provider} key uploaded as secret version {version} (value omitted).")
-        # The token container deliberately outlives the phone-test Terraform state.
-        existing = self.gcloud(
-            "secrets",
-            "describe",
-            self.config.demo_secret,
-            "--format=value(name)",
-            missing_ok=True,
+
+    def configure_auth(self):
+        """Fields absent from the installed Terraform provider, configured by REST."""
+        access = self.gcloud("auth", "print-access-token").strip()
+        payload = {
+            "emailPrivacyConfig": {"enableImprovedEmailPrivacy": True},
+            "passwordPolicyConfig": {
+                "enforcementState": "ENFORCE",
+                "forceUpgradeOnSignin": False,
+                "constraints": {
+                    "minLength": 12,
+                    "maxLength": 4096,
+                    "requireUppercase": True,
+                    "requireLowercase": True,
+                    "requireNumeric": True,
+                    "requireNonAlphanumeric": True,
+                },
+            },
+        }
+        response = httpx.patch(
+            f"https://identitytoolkit.googleapis.com/admin/v2/projects/{self.config.project_id}/config",
+            params={"updateMask": "emailPrivacyConfig,passwordPolicyConfig"},
+            headers={
+                "Authorization": f"Bearer {access}",
+                "X-Goog-User-Project": self.config.project_id,
+            },
+            json=payload,
+            timeout=30,
         )
-        if existing is None:
-            self.gcloud(
-                "secrets",
-                "create",
-                self.config.demo_secret,
-                "--replication-policy=automatic",
+        if response.status_code != 200:
+            raise DeploymentError(
+                f"Identity configuration failed (HTTP {response.status_code}); inspect project provider settings."
             )
-        self.gcloud(
-            "secrets",
-            "add-iam-policy-binding",
-            self.config.demo_secret,
-            f"--member=serviceAccount:{self.config.service_account}",
-            "--role=roles/secretmanager.secretAccessor",
-        )
-        demo_version = self.latest_version(self.config.demo_secret, required=False)
-        if demo_version is None or rotate_demo_token:
-            token = os.environ.get(
-                "DEMO_BEARER_TOKEN", values.get("DEMO_BEARER_TOKEN")
-            ) or secrets.token_urlsafe(32)
-            demo_version = self.add_secret(self.config.demo_secret, token)
-        print(f"Demo token secret version {demo_version} is available (value omitted).")
-        print(
-            "Existing revisions retain their pinned secret versions until redeployed."
-        )
+        print("Enabled email enumeration protection and the required password policy.")
 
     def build(self, tag):
         self.run(build_command(tag))
@@ -241,36 +237,28 @@ class Deployer:
                 return traffic["url"], traffic["revisionName"]
         raise DeploymentError("Cloud Run did not return the candidate revision URL.")
 
-    def release(
-        self, *, model, image=None, tag=None, provider="groq", segmentation_model=""
-    ):
+    def release(self, *, model, image=None, tag=None, provider="groq", segmentation_model=""):
         if not model or not re.fullmatch(r"[A-Za-z0-9._/-]+", model):
-            raise DeploymentError(
-                "Pass --model with a valid model ID for the selected provider."
-            )
+            raise DeploymentError("Pass --model with a valid model ID for the selected provider.")
         if image and not re.fullmatch(
             re.escape(self.config.repository) + r"/backend@sha256:[0-9a-f]{64}", image
         ):
             raise DeploymentError(
                 "--image must be a backend image digest from the provisioned repository."
             )
-        model_secret = (
-            self.config.muse_secret if provider == "muse" else self.config.groq_secret
-        )
+        model_secret = self.config.muse_secret if provider == "muse" else self.config.groq_secret
         model_key = "MUSE_API_KEY" if provider == "muse" else "GROQ_API_KEY"
         model_version = self.latest_version(model_secret)
-        demo_version = self.latest_version(self.config.demo_secret)
-        demo_token = self.secret_value(self.config.demo_secret, demo_version)
+        if not self.config.annotation_worker_url or not self.config.annotation_tasks_queue:
+            raise DeploymentError(
+                "Configure the stable worker URL and apply Terraform for durable account cleanup before release."
+            )
+        user_token = self.smoke_token()
         previous = self.describe(missing_ok=True)
         if previous:
-            self.active_revision(
-                previous
-            )  # This CLI deliberately owns single-revision traffic.
+            self.active_revision(previous)  # This CLI deliberately owns single-revision traffic.
         release_id = (
-            "r"
-            + datetime.now(timezone.utc).strftime("%y%m%d-%H%M%S")
-            + "-"
-            + uuid4().hex[:6]
+            "r" + datetime.now(timezone.utc).strftime("%y%m%d-%H%M%S") + "-" + uuid4().hex[:6]
         )
         built_here = image is None
         image = image or self.build_push(tag or release_id)
@@ -284,17 +272,20 @@ class Deployer:
             "PHOTOS_BUCKET": self.config.photos_bucket,
             "BACKEND_SOURCE_HASH": source_hash() if built_here else "external-image",
         }
+        if self.config.annotation_worker_url:
+            environment.update(
+                {
+                    "ANNOTATION_TASKS_QUEUE": self.config.annotation_tasks_queue,
+                    "ANNOTATION_WORKER_URL": self.config.annotation_worker_url,
+                    "ANNOTATION_WORKER_SERVICE_ACCOUNT": self.config.service_account,
+                }
+            )
         if segmentation_model:
-            if provider != "muse" or not re.fullmatch(
-                r"[A-Za-z0-9._/-]+", segmentation_model
-            ):
+            if provider != "muse" or not re.fullmatch(r"[A-Za-z0-9._/-]+", segmentation_model):
                 raise DeploymentError(
                     "Segmentation requires MUSE and a valid segmentation model ID."
                 )
-            if (
-                not self.config.annotation_tasks_queue
-                or not self.config.annotation_worker_url
-            ):
+            if not self.config.annotation_tasks_queue or not self.config.annotation_worker_url:
                 raise DeploymentError(
                     "Set annotation_worker_url and apply Terraform to provision recovery before enabling highlighting."
                 )
@@ -326,27 +317,21 @@ class Deployer:
             "--cpu-throttling",
             f"--revision-suffix={release_id}",
             f"--tag={release_id}",
-            "--set-env-vars="
-            + ",".join(f"{key}={value}" for key, value in environment.items()),
-            (
-                f"--set-secrets={model_key}={model_secret}:{model_version},"
-                f"DEMO_BEARER_TOKEN={self.config.demo_secret}:{demo_version}"
-            ),
+            "--set-env-vars=" + ",".join(f"{key}={value}" for key, value in environment.items()),
+            (f"--set-secrets={model_key}={model_secret}:{model_version}"),
             "--format=json",
         ]
         if previous:
             arguments.append("--no-traffic")
-        print(
-            "Deploying production revision with numbered secret references.", flush=True
-        )
+        print("Deploying production revision with numbered secret references.", flush=True)
         candidate = json.loads(self.gcloud(*arguments, regional=True))
         url, revision = self.tagged_url(candidate, release_id)
         # Existing service traffic stays untouched if staging verification fails.
-        self.verify_url(url, demo_token)
+        self.verify_url(url, user_token)
         self.promote(revision)
         current = self.describe()
         try:
-            self.verify_url(current["status"]["url"], demo_token)
+            self.verify_url(current["status"]["url"], user_token)
         except (DeploymentError, httpx.HTTPError):
             if previous:
                 self.promote(self.active_revision(previous))
@@ -357,9 +342,7 @@ class Deployer:
             raise
         print(f"Released {revision}: {current['status']['url']}")
         if previous:
-            print(
-                f"Previous revision (rollback target): {self.active_revision(previous)}"
-            )
+            print(f"Previous revision (rollback target): {self.active_revision(previous)}")
 
     def promote(self, revision):
         self.gcloud(
@@ -374,15 +357,9 @@ class Deployer:
     @staticmethod
     def active_revision(service):
         active = [
-            item
-            for item in service["status"].get("traffic", [])
-            if item.get("percent", 0) > 0
+            item for item in service["status"].get("traffic", []) if item.get("percent", 0) > 0
         ]
-        if (
-            len(active) != 1
-            or active[0]["percent"] != 100
-            or not active[0].get("revisionName")
-        ):
+        if len(active) != 1 or active[0]["percent"] != 100 or not active[0].get("revisionName"):
             raise DeploymentError(
                 "Expected one revision serving 100% of traffic; inspect existing traffic manually."
             )
@@ -390,29 +367,32 @@ class Deployer:
 
     def revision_token(self, revision):
         data = json.loads(
-            self.gcloud(
-                "run", "revisions", "describe", revision, "--format=json", regional=True
-            )
+            self.gcloud("run", "revisions", "describe", revision, "--format=json", regional=True)
         )
         if (
             data["metadata"]["labels"].get("serving.knative.dev/service")
             != self.config.service_name
         ):
             raise DeploymentError("Revision belongs to a different service.")
-        environment = {
-            item["name"]: item for item in data["spec"]["containers"][0]["env"]
-        }
+        environment = {item["name"]: item for item in data["spec"]["containers"][0]["env"]}
         if environment.get("ENVIRONMENT", {}).get("value") != "production":
             raise DeploymentError("Revision is not configured for production.")
-        reference = environment["DEMO_BEARER_TOKEN"]["valueFrom"]["secretKeyRef"]
-        if (
-            reference["name"] != self.config.demo_secret
-            or not reference["key"].isdecimal()
-        ):
+        if "DEMO_BEARER_TOKEN" in environment:
             raise DeploymentError(
-                "Revision does not pin the expected demo token secret version."
+                "Legacy demo-auth revisions cannot serve account data. Deploy an account-auth revision."
             )
-        return self.secret_value(reference["name"], reference["key"])
+        if environment.get("GOOGLE_CLOUD_PROJECT", {}).get("value") != self.config.project_id:
+            raise DeploymentError("Revision uses the wrong identity project.")
+        return self.smoke_token()
+
+    @staticmethod
+    def smoke_token():
+        token = os.environ.get("HOME_SAFETY_SMOKE_ID_TOKEN", "")
+        if not token:
+            raise DeploymentError(
+                "Set HOME_SAFETY_SMOKE_ID_TOKEN to a current verified test-user Firebase ID token. It is used only in memory for smoke checks."
+            )
+        return token
 
     def verify(self):
         service = self.describe()
@@ -421,9 +401,7 @@ class Deployer:
 
     def delete_service(self):
         if self.describe(missing_ok=True):
-            self.gcloud(
-                "run", "services", "delete", self.config.service_name, regional=True
-            )
+            self.gcloud("run", "services", "delete", self.config.service_name, regional=True)
         print("Cloud Run service removed; Terraform dependencies can now be destroyed.")
 
     def configure_phone(self, env_file):
@@ -431,17 +409,21 @@ class Deployer:
         token = self.revision_token(self.active_revision(service))
         url = service["status"]["url"]
         self.verify_url(url, token)
+        from dotenv import unset_key
+
+        if env_file.exists():
+            unset_key(str(env_file), "EXPO_PUBLIC_DEMO_TOKEN")
+            unset_key(str(env_file), "DEMO_BEARER_TOKEN")
         env_file.touch(mode=0o600, exist_ok=True)
         env_file.chmod(0o600)
         for name, value in {
-            "DEMO_BEARER_TOKEN": token,
             "EXPO_PUBLIC_DATA_SOURCE": "api",
             "EXPO_PUBLIC_API_URL": url,
-            "EXPO_PUBLIC_DEMO_TOKEN": token,
+            "EXPO_PUBLIC_FIREBASE_PROJECT_ID": self.config.project_id,
         }.items():
             set_key(str(env_file), name, value)
         print(
-            f"Configured {env_file} for the verified API. Restart Expo; token value omitted."
+            f"Configured {env_file} for the verified API. Set public Firebase app config and restart Expo."
         )
 
     def rollback(self, revision):
@@ -462,9 +444,7 @@ class Deployer:
         self.verify_url(url, token)
         self.promote(revision)
         self.verify_url(self.describe()["status"]["url"], token)
-        print(
-            f"Traffic restored to {revision}; it uses its original pinned secret versions."
-        )
+        print(f"Traffic restored to {revision}; it uses its original pinned secret versions.")
 
     @staticmethod
     def verify_url(url, token):
@@ -473,7 +453,7 @@ class Deployer:
             url,
         ):
             raise DeploymentError("Expected an HTTPS API origin without a path.")
-        device, assessment = str(uuid4()), str(uuid4())
+        assessment = str(uuid4())
         path = f"/v1/assessments/{assessment}"
         # A tiny fixture is uploaded to verify the runtime's actual Firestore/GCS
         # permissions. It never goes to the model and is deleted after the check.
@@ -489,13 +469,13 @@ class Deployer:
                     )
                 return response
 
-            expect(client.get("/health"), 401)
+            expect(client.get("/health"), 200)
+            expect(client.get("/v1/assessments/latest"), 401)
             expect(
-                client.get("/health", headers={"Authorization": "Bearer invalid"}), 401
+                client.get("/v1/assessments/latest", headers={"Authorization": "Bearer invalid"}),
+                401,
             )
-            client.headers.update(
-                {"Authorization": f"Bearer {token}", "X-Device-ID": device}
-            )
+            client.headers.update({"Authorization": f"Bearer {token}"})
             expect(client.get("/health"), 200)
             for route in ("/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"):
                 expect(client.get(route), 404)
@@ -510,13 +490,13 @@ class Deployer:
                 ).json()
                 expect(client.get(path), 200)
                 expect(client.get(path + "/photos/" + created["photo"]["id"]), 200)
-                expect(client.get(path, headers={"X-Device-ID": str(uuid4())}), 404)
+                expect(client.get(path, headers={"Authorization": "Bearer invalid"}), 401)
                 expect(
                     client.get(
                         path + "/photos/" + created["photo"]["id"],
-                        headers={"X-Device-ID": str(uuid4())},
+                        headers={"Authorization": "Bearer invalid"},
                     ),
-                    404,
+                    401,
                 )
             finally:
                 try:
@@ -524,11 +504,11 @@ class Deployer:
                 except (DeploymentError, httpx.HTTPError) as error:
                     raise DeploymentError(
                         f"Deployment fixture cleanup failed; retry deleting assessment_id={assessment} "
-                        f"with device_id={device} after fixing storage access."
+                        f"with the same test account after fixing storage access."
                     ) from error
             expect(client.get(path), 404)
         print(
-            "Verified HTTPS, token gate, disabled API docs, private storage CRUD and device scoping.",
+            "Verified HTTPS, Firebase token gate, disabled API docs and private storage CRUD.",
             flush=True,
         )
 
@@ -551,14 +531,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--account", help="gcloud operator account override")
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser(
+        "configure-auth", help="Enable account enumeration protection and password policy"
+    )
     build = sub.add_parser("build", help="Build a local image without cloud access")
     build.add_argument("--tag", default="home-safety-backend:dev")
-    secret = sub.add_parser(
-        "secrets", help="Upload selected model key and initialize/reuse a demo token"
-    )
+    secret = sub.add_parser("secrets", help="Upload the selected backend model key")
     secret.add_argument("--provider", choices=["groq", "muse"], default="groq")
     secret.add_argument("--env-file", type=Path, default=ROOT / ".env")
-    secret.add_argument("--rotate-demo-token", action="store_true")
     release = sub.add_parser(
         "release", help="Build/push and verify a candidate before routing traffic"
     )
@@ -568,18 +548,12 @@ def main():
         "--model",
         help="Model ID; required explicitly for Muse releases",
     )
-    release.add_argument(
-        "--tag", help="Unique Artifact Registry image tag (otherwise generated)"
-    )
+    release.add_argument("--tag", help="Unique Artifact Registry image tag (otherwise generated)")
     release.add_argument(
         "--image", help="Deploy an existing repository image digest instead of building"
     )
-    sub.add_parser(
-        "verify", help="Check active revision including storage, without model calls"
-    )
-    sub.add_parser(
-        "status", help="Show URL and serving revision, without configuration secrets"
-    )
+    sub.add_parser("verify", help="Check active revision including storage, without model calls")
+    sub.add_parser("status", help="Show URL and serving revision, without configuration secrets")
     sub.add_parser("service-url", help="Print the current Cloud Run service HTTPS URL")
     sub.add_parser(
         "delete-service",
@@ -598,23 +572,21 @@ def main():
     try:
         if args.command == "build":
             subprocess.run(build_command(args.tag), check=True)
-            print(
-                "Current local backend image built. Provision through scripts/terraform-gcp.py."
-            )
+            print("Current local backend image built. Provision through scripts/terraform-gcp.py.")
             return 0
         deployer = Deployer(load_config(), args.account)
-        if args.command == "secrets":
+        if args.command == "configure-auth":
+            deployer.configure_auth()
+        elif args.command == "secrets":
             deployer.publish_secrets(
                 args.env_file,
-                rotate_demo_token=args.rotate_demo_token,
                 provider=args.provider,
             )
         elif args.command == "release":
             deployer.release(
                 model=args.model
                 or (
-                    os.environ.get("GROQ_MODEL")
-                    or dotenv_values(ROOT / ".env").get("GROQ_MODEL")
+                    os.environ.get("GROQ_MODEL") or dotenv_values(ROOT / ".env").get("GROQ_MODEL")
                     if args.provider == "groq"
                     else None
                 ),
@@ -652,9 +624,7 @@ def main():
         FileNotFoundError,
     ) as error:
         # Avoid printing HTTP requests, response bodies, or subprocess args with payloads.
-        message = (
-            str(error) if isinstance(error, DeploymentError) else type(error).__name__
-        )
+        message = str(error) if isinstance(error, DeploymentError) else type(error).__name__
         print(f"Deployment failed: {message}", file=sys.stderr)
         return 1
 

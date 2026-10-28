@@ -34,6 +34,7 @@ class Deployment:
 
     def save_variables(self, **updates):
         values = json.loads(VARIABLES.read_text()) if VARIABLES.exists() else {}
+        values.pop("demo_token_initialized", None)
         values.update(updates)
         # No secret values belong in Terraform inputs.
         with open(VARIABLES, "w", opener=lambda path, flags: os.open(path, flags, 0o600)) as file:
@@ -76,10 +77,28 @@ class Deployment:
                     worker_url = json.loads(VARIABLES.read_text()).get("annotation_worker_url", "")
         self.save_variables(annotation_worker_url=worker_url)
         self.apply()
+        if not worker_url:
+            config = self.output("deployment_config")
+            account = [f"--account={self.args.account}"] if self.args.account else []
+            number = run(
+                [
+                    "gcloud",
+                    *account,
+                    "projects",
+                    "describe",
+                    config["project_id"],
+                    "--format=value(projectNumber)",
+                ],
+                capture=True,
+            ).strip()
+            if not number.isdecimal():
+                raise RuntimeError("Could not resolve the canonical Cloud Run origin.")
+            worker_url = f"https://{config['service_name']}-{number}.{config['region']}.run.app"
+            self.save_variables(annotation_worker_url=worker_url)
+            self.apply()
+        run([*self.backend, "configure-auth"])
         run([*self.backend, "secrets", "--provider", "muse"])
-        self.save_variables(demo_token_initialized=True)
-        self.apply()
-        self.release(highlights=bool(worker_url))
+        self.release(highlights=True)
         run([*self.backend, "phone-env"])
 
     def finish(self):
@@ -89,7 +108,6 @@ class Deployment:
         run([*self.backend, "verify"])
         self.save_variables(
             annotation_worker_url=service_url,
-            demo_token_initialized=True,
         )
         self.apply()
         self.release(highlights=True)
@@ -98,11 +116,14 @@ class Deployment:
         if self.args.start_expo:
             # npm's Expo launcher reads only root EXPO_PUBLIC_ entries.
             run(["bash", "-c", "source scripts/frontend-env.sh && npm --prefix mobile ci"])
-            run([
-                "bash", "-c",
-                "source scripts/frontend-env.sh && "
-                "npm --prefix mobile run start:tunnel -- --go --clear",
-            ])
+            run(
+                [
+                    "bash",
+                    "-c",
+                    "source scripts/frontend-env.sh && "
+                    "npm --prefix mobile run start:tunnel -- --go --clear",
+                ]
+            )
         else:
             print(
                 "\nPhone configuration is ready. Start Expo from the repository root:\n"
@@ -115,13 +136,20 @@ class Deployment:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "command", choices=["start", "stop"], nargs="?", default="start",
+        "command",
+        choices=["start", "stop"],
+        nargs="?",
+        default="start",
         help="start deploys (default); stop destroys managed resources and stored data",
     )
     parser.add_argument("--stage", choices=["all", "bootstrap", "finish"])
     parser.add_argument("--model", help="Muse model ID; defaults to MUSE_MAIN_MODEL in root .env")
     parser.add_argument("--account", help="Override the active gcloud account")
-    parser.add_argument("--start-expo", action="store_true", help="Install mobile dependencies and run the tunnel after finish")
+    parser.add_argument(
+        "--start-expo",
+        action="store_true",
+        help="Install mobile dependencies and run the tunnel after finish",
+    )
     args = parser.parse_args()
     if args.command == "stop" and (args.stage or args.start_expo or args.model):
         parser.error("--stage, --start-expo and --model apply only to start")
@@ -148,17 +176,25 @@ def main():
             deployment.stop()
             return 0
         # Resolve dotenv using the synced backend environment; never print credentials.
-        settings = json.loads(run([
-            PYTHON, "-c",
-            "import json, os; from dotenv import dotenv_values; "
-            "v={**dotenv_values('.env'), **os.environ}; "
-            "print(json.dumps({'model': v.get('MUSE_MAIN_MODEL'), "
-            "'has_key': bool(v.get('MUSE_API_KEY'))}))",
-        ], capture=True))
+        settings = json.loads(
+            run(
+                [
+                    PYTHON,
+                    "-c",
+                    "import json, os; from dotenv import dotenv_values; "
+                    "v={**dotenv_values('.env'), **os.environ}; "
+                    "print(json.dumps({'model': v.get('MUSE_MAIN_MODEL'), "
+                    "'has_key': bool(v.get('MUSE_API_KEY'))}))",
+                ],
+                capture=True,
+            )
+        )
         args.model = args.model or settings["model"]
         if args.stage in {"all", "bootstrap", "finish"}:
             if not args.model or not re.fullmatch(r"[A-Za-z0-9._/-]+", args.model):
-                raise RuntimeError("Set MUSE_MAIN_MODEL in root .env or pass --model with a valid model ID.")
+                raise RuntimeError(
+                    "Set MUSE_MAIN_MODEL in root .env or pass --model with a valid model ID."
+                )
         if args.stage in {"all", "bootstrap"} and not settings["has_key"]:
             raise RuntimeError("Set MUSE_API_KEY in root .env or your environment.")
         run([*deployment.backend, "build"])
@@ -169,7 +205,14 @@ def main():
         if args.stage in {"all", "finish"}:
             deployment.finish()
         return 0
-    except (RuntimeError, OSError, ValueError, subprocess.CalledProcessError, EOFError, KeyboardInterrupt) as error:
+    except (
+        RuntimeError,
+        OSError,
+        ValueError,
+        subprocess.CalledProcessError,
+        EOFError,
+        KeyboardInterrupt,
+    ) as error:
         if isinstance(error, subprocess.CalledProcessError):
             # Captured subprocess output may contain secrets; do not echo it.
             message = f"A deployment command failed (exit {error.returncode})."

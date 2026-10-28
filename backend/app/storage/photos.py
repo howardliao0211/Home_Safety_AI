@@ -8,6 +8,7 @@ from google.auth.credentials import AnonymousCredentials
 from google.cloud import storage
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+from app.auth import owner_key
 from app.config import Settings
 from app.errors import AppError
 from app.models.schemas import Photo
@@ -46,13 +47,13 @@ def prepare_photo(data: bytes) -> tuple[Photo, bytes]:
 
 class PhotoStore(Protocol):
     def put(
-        self, device_id: str, assessment_id: str, photo: Photo, data: bytes, *, timeout: float = 20
+        self, owner_uid: str, assessment_id: str, photo: Photo, data: bytes, *, timeout: float = 20
     ) -> None: ...
     def get(
-        self, device_id: str, assessment_id: str, photo: Photo, *, timeout: float = 20
+        self, owner_uid: str, assessment_id: str, photo: Photo, *, timeout: float = 20
     ) -> bytes: ...
-    def delete(self, device_id: str, assessment_id: str, photo: Photo) -> None: ...
-    def delete_assessment(self, device_id: str, assessment_id: str) -> None: ...
+    def delete(self, owner_uid: str, assessment_id: str, photo: Photo) -> None: ...
+    def delete_assessment(self, owner_uid: str, assessment_id: str) -> None: ...
     def annotation_assets(self): ...
     def close(self) -> None: ...
 
@@ -66,6 +67,7 @@ class GCSPhotoStore:
             if settings.storage_emulator_host
             else None,
         )
+        self.account_guard = None
         self.bucket = self.client.bucket(settings.photos_bucket)
         if settings.storage_emulator_host:
             # Local emulator only. Production buckets are managed by Terraform.
@@ -77,35 +79,52 @@ class GCSPhotoStore:
                 pass
 
     @staticmethod
-    def prefix(device_id: str, assessment_id: str) -> str:
-        return f"devices/{device_id}/assessments/{assessment_id}/"
+    def prefix(owner_uid: str, assessment_id: str) -> str:
+        return f"users/{owner_key(owner_uid)}/assessments/{assessment_id}/"
 
-    def blob(self, device_id: str, assessment_id: str, photo: Photo):
-        return self.bucket.blob(self.prefix(device_id, assessment_id) + photo.id)
+    def blob(self, owner_uid: str, assessment_id: str, photo: Photo):
+        return self.bucket.blob(self.prefix(owner_uid, assessment_id) + photo.id)
 
     def put(
-        self, device_id: str, assessment_id: str, photo: Photo, data: bytes, *, timeout: float = 20
+        self, owner_uid: str, assessment_id: str, photo: Photo, data: bytes, *, timeout: float = 20
     ):
-        self.blob(device_id, assessment_id, photo).upload_from_string(
+        if self.account_guard:
+            self.account_guard(owner_uid)
+        self.blob(owner_uid, assessment_id, photo).upload_from_string(
             data, content_type=photo.content_type, timeout=timeout, retry=None
         )
+        if self.account_guard:
+            try:
+                self.account_guard(owner_uid)
+            except AppError:
+                self.delete(owner_uid, assessment_id, photo)
+                raise
 
     def get(
-        self, device_id: str, assessment_id: str, photo: Photo, *, timeout: float = 20
+        self, owner_uid: str, assessment_id: str, photo: Photo, *, timeout: float = 20
     ) -> bytes:
-        return self.blob(device_id, assessment_id, photo).download_as_bytes(
+        return self.blob(owner_uid, assessment_id, photo).download_as_bytes(
             timeout=timeout, retry=None
         )
 
-    def delete(self, device_id: str, assessment_id: str, photo: Photo):
+    def delete(self, owner_uid: str, assessment_id: str, photo: Photo):
         try:
-            self.blob(device_id, assessment_id, photo).delete(timeout=10, retry=None)
+            self.blob(owner_uid, assessment_id, photo).delete(timeout=10, retry=None)
         except NotFound:
             pass
 
-    def delete_assessment(self, device_id: str, assessment_id: str):
+    def delete_assessment(self, owner_uid: str, assessment_id: str):
         for blob in self.client.list_blobs(
-            self.bucket, prefix=self.prefix(device_id, assessment_id), timeout=20, retry=None
+            self.bucket, prefix=self.prefix(owner_uid, assessment_id), timeout=20, retry=None
+        ):
+            try:
+                blob.delete(timeout=20, retry=None)
+            except NotFound:
+                pass
+
+    def delete_account(self, uid):
+        for blob in self.client.list_blobs(
+            self.bucket, prefix=f"users/{owner_key(uid)}/", timeout=20, retry=None
         ):
             try:
                 blob.delete(timeout=20, retry=None)
@@ -113,15 +132,18 @@ class GCSPhotoStore:
                 pass
 
     def annotation_assets(self):
-        for blob in self.client.list_blobs(self.bucket, prefix="devices/", timeout=10, retry=None):
+        for blob in self.client.list_blobs(self.bucket, prefix="users/", timeout=10, retry=None):
             parts = blob.name.split("/")
             if (
                 len(parts) == 5
-                and parts[0] == "devices"
+                and parts[0] == "users"
                 and parts[2] == "assessments"
                 and parts[4].startswith("annotation-")
             ):
-                yield parts[1], parts[3], parts[4].removeprefix("annotation-")
+                import base64
+
+                uid = base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)).decode()
+                yield uid, parts[3], parts[4].removeprefix("annotation-")
 
     def close(self):
         self.client.close()

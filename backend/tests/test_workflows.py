@@ -31,7 +31,7 @@ def test_create_analyze_and_reopen_latest(rig, create, settings):
     assert "not a professional home safety inspection" in analyzed["disclaimer"]
     assert "lease" not in analyzed and "input_hash" not in analyzed
     with TestClient(create_app(settings, repo, photos, provider)) as restarted:
-        restarted.headers["X-Device-ID"] = client.headers["X-Device-ID"]
+        restarted.headers["Authorization"] = client.headers["Authorization"]
         assert restarted.get("/v1/assessments/latest").json() == analyzed
         assert restarted.get(base(first)).status_code == 200
 
@@ -207,6 +207,7 @@ def test_device_scoping_for_all_operations(rig, assessed, photo_bytes):
     client, _, _, _ = rig
     owner = client.headers["X-Device-ID"]
     client.headers["X-Device-ID"] = str(uuid4())
+    client.headers["Authorization"] = "Bearer " + client.headers["X-Device-ID"]
     path = finding_path(assessed)
     assert client.get(base(assessed)).status_code == 404
     assert client.get("/v1/assessments/latest").status_code == 404
@@ -222,8 +223,9 @@ def test_device_scoping_for_all_operations(rig, assessed, photo_bytes):
         ).status_code
         == 404
     )
-    assert client.delete(base(assessed)).status_code == 204
+    assert client.delete(base(assessed)).status_code == 404
     client.headers["X-Device-ID"] = owner
+    client.headers["Authorization"] = "Bearer " + owner
     assert client.get(base(assessed)).status_code == 200
 
 
@@ -239,7 +241,7 @@ def test_partial_deletion_is_retryable_and_hidden(rig, create, assessed, photo_b
     assert client.get("/v1/assessments/latest").json()["id"] == previous["id"]
     photos.fail_delete = False
     assert client.delete(base(newest)).status_code == 204
-    assert client.delete(base(newest)).status_code == 204
+    assert client.delete(base(newest)).status_code == 404
     assert repo.get(client.headers["X-Device-ID"], newest["id"]) is None
     assert client.get(base(previous)).status_code == 200
 
@@ -308,13 +310,11 @@ def test_auth_validation_and_unreadable_photo(rig, settings):
     )
     assert response.status_code == 422
     assert not repo.records and not photos.objects
+    # Device headers have no effect on authentication; health is public liveness.
     client.headers["X-Device-ID"] = "../other-device"
-    assert client.get("/v1/assessments/latest").status_code == 422
-    from pydantic import SecretStr
-
-    settings.demo_bearer_token = SecretStr("private-demo-token")
-    assert client.get("/health").status_code == 401
+    assert client.get("/v1/assessments/latest").status_code == 404
     client.headers["Authorization"] = "Bearer private-demo-token"
+    assert client.get("/v1/assessments/latest").status_code == 401
     assert client.get("/health").status_code == 200
 
 

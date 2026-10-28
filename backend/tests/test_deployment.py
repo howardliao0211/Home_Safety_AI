@@ -28,7 +28,8 @@ def config():
         photos_bucket="test-photos",
         database_id="(default)",
         groq_secret="groq-secret",
-        demo_secret="demo-secret",
+        annotation_worker_url="https://test.run.app",
+        annotation_tasks_queue="projects/test-project/locations/us-central1/queues/highlights",
     )
 
 
@@ -39,7 +40,9 @@ def production(settings):
         environment="production",
         groq_api_key="fake-key",
         groq_model="fake-model",
-        demo_bearer_token="fake-demo-token",
+        annotation_worker_url="https://test.run.app",
+        annotation_worker_service_account="worker@test",
+        annotation_tasks_queue="queue",
     )
 
 
@@ -47,8 +50,13 @@ def test_production_disables_docs_and_enforces_api_auth(production):
     with TestClient(
         create_app(production, MemoryRepository(), MemoryPhotos(), StubProvider())
     ) as client:
-        assert client.get("/health").status_code == 401
-        assert client.get("/health", headers={"Authorization": "Bearer wrong"}).status_code == 401
+        assert client.get("/health").status_code == 200
+        assert (
+            client.get(
+                "/v1/assessments/latest", headers={"Authorization": "Bearer wrong"}
+            ).status_code
+            == 401
+        )
         client.headers["Authorization"] = "Bearer fake-demo-token"
         assert client.get("/health").json() == {"status": "ok"}
         for path in ("/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"):
@@ -79,7 +87,9 @@ def test_release_verifier_exercises_real_auth_upload_scoping_and_cleanup(product
             "Client",
             lambda **kwargs: real_client(**kwargs, transport=httpx.MockTransport(forward)),
         )
-        deploy.Deployer.verify_url("https://candidate---service.run.app", "fake-demo-token")
+        deploy.Deployer.verify_url(
+            "https://candidate---service.run.app", "11111111-1111-4111-8111-111111111111"
+        )
     assert repository.records == {} and photos.objects == {} and provider.calls == []
 
 
@@ -89,6 +99,9 @@ class FakeRelease(deploy.Deployer):
         self.commands = []
         self.checks = []
         self.fail_at = fail_at
+
+    def smoke_token(self):
+        return "test-user-token"
 
     def latest_version(self, secret, **kwargs):
         return "3" if secret == self.config.groq_secret else "7"
@@ -133,7 +146,7 @@ def test_candidate_failure_does_not_promote_or_expose_secrets(config):
     command = runner.commands[0]
     assert "--no-traffic" in command
     assert "fake-private-token" not in " ".join(command)
-    assert "--set-secrets=GROQ_API_KEY=groq-secret:3,DEMO_BEARER_TOKEN=demo-secret:7" in command
+    assert "--set-secrets=GROQ_API_KEY=groq-secret:3" in command
     env = next(arg for arg in command if arg.startswith("--set-env-vars="))
     assert "ENVIRONMENT=production" in env and "EMULATOR" not in env
 
@@ -166,44 +179,39 @@ def test_secret_values_use_stdin_and_existing_demo_token_is_reused(
 
     monkeypatch.setattr(deploy.subprocess, "run", run)
     deploy.Deployer(config).publish_secrets(file)
-    uploads = [(command, value) for command, value in calls if command[1:4] == ["secrets", "versions", "add"]]
+    uploads = [
+        (command, value)
+        for command, value in calls
+        if command[1:4] == ["secrets", "versions", "add"]
+    ]
     assert len(uploads) == 1 and uploads[0][1] == "fake-groq-secret"
     assert all("fake-groq-secret" not in " ".join(command) for command, _ in calls)
     assert "fake-groq-secret" not in capsys.readouterr().out
 
 
-def test_rollback_uses_revision_secret_version_not_latest(config, monkeypatch):
+def test_rollback_rejects_legacy_demo_auth_revision(config, monkeypatch):
     runner = deploy.Deployer(config)
-    calls = []
-
-    def gcloud(*args, **kwargs):
-        calls.append(args)
-        if args[:3] == ("run", "revisions", "describe"):
-            return json.dumps(
-                {
-                    "metadata": {"labels": {"serving.knative.dev/service": config.service_name}},
-                    "spec": {
-                        "containers": [
-                            {
-                                "env": [
-                                    {"name": "ENVIRONMENT", "value": "production"},
-                                    {
-                                        "name": "DEMO_BEARER_TOKEN",
-                                        "valueFrom": {
-                                            "secretKeyRef": {"name": config.demo_secret, "key": "2"}
-                                        },
-                                    },
-                                ]
-                            }
-                        ]
-                    },
-                }
-            )
-        return "original-version-token"
-
-    monkeypatch.setattr(runner, "gcloud", gcloud)
-    assert runner.revision_token("old-revision") == "original-version-token"
-    assert calls[-1][:4] == ("secrets", "versions", "access", "2")
+    monkeypatch.setattr(
+        runner,
+        "gcloud",
+        lambda *args, **kwargs: json.dumps(
+            {
+                "metadata": {"labels": {"serving.knative.dev/service": config.service_name}},
+                "spec": {
+                    "containers": [
+                        {
+                            "env": [
+                                {"name": "ENVIRONMENT", "value": "production"},
+                                {"name": "DEMO_BEARER_TOKEN", "value": "old"},
+                            ]
+                        }
+                    ]
+                },
+            }
+        ),
+    )
+    with pytest.raises(deploy.DeploymentError, match="Legacy demo-auth"):
+        runner.revision_token("old-revision")
 
 
 def test_container_entrypoint_honors_port(monkeypatch):
@@ -264,9 +272,7 @@ def test_capacity_admits_twelve_concurrent_highlight_attempts(config):
     assert int(re.search(r"max_dispatches_per_second\s*=\s*(\d+)", queue).group(1)) >= 12
 
 
-def test_phone_env_refreshes_service_url_and_pinned_token(
-    config, tmp_path, monkeypatch, capsys
-):
+def test_phone_env_refreshes_service_url_and_pinned_token(config, tmp_path, monkeypatch, capsys):
     from dotenv import dotenv_values
 
     env_file = tmp_path / ".env"
@@ -278,15 +284,21 @@ def test_phone_env_refreshes_service_url_and_pinned_token(
         ("https://first-service.run.app", "first-pinned-token"),
         ("https://recreated-service.run.app", "second-pinned-token"),
     ):
-        monkeypatch.setattr(runner, "describe", lambda url=url: {
-            "status": {"url": url, "traffic": [{"revisionName": "serving", "percent": 100}]},
-        })
+        monkeypatch.setattr(
+            runner,
+            "describe",
+            lambda url=url: {
+                "status": {"url": url, "traffic": [{"revisionName": "serving", "percent": 100}]},
+            },
+        )
         monkeypatch.setattr(runner, "revision_token", lambda revision, token=token: token)
         runner.configure_phone(env_file)
         values = dotenv_values(env_file)
         assert values["EXPO_PUBLIC_API_URL"] == url
         assert values["EXPO_PUBLIC_DATA_SOURCE"] == "api"
-        assert values["EXPO_PUBLIC_DEMO_TOKEN"] == values["DEMO_BEARER_TOKEN"] == token
+        assert "EXPO_PUBLIC_DEMO_TOKEN" not in values
+        assert "DEMO_BEARER_TOKEN" not in values
+        assert values["EXPO_PUBLIC_FIREBASE_PROJECT_ID"] == config.project_id
         assert values["MUSE_API_KEY"] == "private-model-key"
         assert values["UNRELATED"] == "keep-me"
         assert checks[-1] == (url, token)

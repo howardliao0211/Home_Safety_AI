@@ -12,7 +12,6 @@ output "deployment_config" {
     annotation_tasks_queue = google_cloud_tasks_queue.annotations.id
     annotation_worker_url  = trimsuffix(var.annotation_worker_url, "/")
     groq_secret            = google_secret_manager_secret.backend["groq-api-key"].secret_id
-    demo_secret            = "home-safety-demo-bearer-token"
   }
 }
 

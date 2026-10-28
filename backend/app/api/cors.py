@@ -17,7 +17,7 @@ class ConfiguredCORS:
                 self.app,
                 allow_origins=settings.cors_origins,
                 allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-                allow_headers=["Authorization", "X-Device-ID", "Content-Type"],
+                allow_headers=["Authorization", "X-Device-ID", "X-Deletion-Receipt", "Content-Type"],
                 expose_headers=["X-Request-ID"],
             )
         return await self.middleware(scope, receive, send)

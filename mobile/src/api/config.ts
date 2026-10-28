@@ -4,8 +4,11 @@ export const apiConfig = {
     /\/+$/,
     "",
   ),
-  demoToken: process.env.EXPO_PUBLIC_DEMO_TOKEN || "",
 };
 export const stateKey = apiEnabled
   ? `state-api-v1:${apiConfig.baseUrl}`
   : "state";
+
+export function accountScope(project: string, uid: string) {
+  return `account-v2:${encodeURIComponent(project)}:${encodeURIComponent(apiConfig.baseUrl)}:${encodeURIComponent(uid)}`;
+}

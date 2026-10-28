@@ -135,7 +135,7 @@ def test_unsupported_configuration_is_explicit_and_creates_no_sam_work(rig, asse
     stored = repo.get(client.headers["X-Device-ID"], assessed["id"])
     assert len(stored.annotations) == 1 and not stored.annotation_dispatch_pending
     assert client.post(base, json={"revision": "old", "retry": True}).status_code == 409
-    other = {"X-Device-ID": str(uuid4())}
+    other = {"Authorization": "Bearer " + str(uuid4())}
     assert client.post(base, headers=other, json={"revision": "initial"}).status_code == 404
 
 
@@ -608,7 +608,7 @@ def test_annotation_reads_are_device_scoped(rig, create):
     client, *_ = rig
     svc, provider, assessed, (job,) = queued(rig, create)
     svc.work(client.headers["X-Device-ID"], assessed["id"], job)
-    other = {"X-Device-ID": str(uuid4())}
+    other = {"Authorization": "Bearer " + str(uuid4())}
     base = path(assessed) + "/" + job
     for suffix in ("", "/mask"):
         assert client.get(base + suffix, headers=other).status_code == 404

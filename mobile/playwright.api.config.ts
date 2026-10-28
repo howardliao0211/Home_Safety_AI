@@ -26,7 +26,8 @@ export default defineConfig({
       env: {
         EXPO_PUBLIC_DATA_SOURCE: "api",
         EXPO_PUBLIC_API_URL: "http://127.0.0.1:8001",
-        EXPO_PUBLIC_DEMO_TOKEN: "browser-integration-token",
+        EXPO_PUBLIC_AUTH_EMULATOR_URL: "http://127.0.0.1:9099",
+        EXPO_PUBLIC_FIREBASE_PROJECT_ID: "home-safety-local",
       },
       url: "http://127.0.0.1:8082",
       timeout: 120_000,

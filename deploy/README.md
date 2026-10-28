@@ -1,4 +1,8 @@
-# GCP Android phone test
+# GCP account-authenticated phone test
+
+For managed identity, emulator and native persistence setup, read
+[authentication](../docs/authentication.md) first. Physical-device checks and cloud
+identity provisioning must pass before release.
 
 The owner runs Expo Go on Android, the development computer runs the Expo tunnel,
 and FastAPI runs in project `home-safety-ai`, region `us-central1`. Keep resources
@@ -15,7 +19,7 @@ in `z`, so health checks use this path for both local and cloud deployments.
 | Infrastructure lifecycle, local image gate, private local state/backups | `scripts/terraform-gcp.py` |
 | APIs, Artifact Registry, Firestore/GCS, service accounts/IAM, Tasks/Scheduler | Terraform configuration |
 | Build/push, secret versions, Cloud Run revisions/traffic, verification, rollback, service deletion | `scripts/deploy-gcp.py` |
-| Persistent demo-token secret | Outside phone-test Terraform state |
+| Managed accounts and provider email actions | Identity Platform/Firebase in the same GCP project |
 
 Install Docker, gcloud, Terraform >=1.14 and <2, uv/Python >=3.10 and pinned Node.
 Sign in using `gcloud auth login`. The provisioning account needs API, storage,
@@ -32,8 +36,8 @@ only through the environment. It inspects release state and reports a next relea
 command; it never silently builds, pushes or releases.
 
 Cloud Run starts with 1 CPU, 2 GiB RAM, concurrency 8, minimum 0, maximum 2 instances,
-and a 300-second timeout. Invocation is public; FastAPI requires the demo bearer
-token and scopes records/photos by per-installation device ID. Production API docs
+and a 300-second timeout. Invocation is public; FastAPI verifies Firebase user ID
+tokens and scopes records/photos by the verified UID. Production API docs
 are disabled. Model credentials stay backend-only. The phone and highlight workers
 use Cloud Run's generated `https://...run.app` service URL with managed HTTPS.
 
@@ -53,7 +57,7 @@ python3 scripts/deploy.py start
 
 Every successful `start` discovers the live Cloud Run service URL and writes it
 to root `.env` as `EXPO_PUBLIC_API_URL`, together with API mode and the serving
-revision's demo token. It also applies that URL as the highlight worker target
+Firebase project ID (no user token). It also applies that URL as the highlight worker target
 before enabling segmentation. Repeated deployments and deployments after `stop`
 refresh these values automatically.
 Restart any running Expo process to load updated settings. To launch Expo after
@@ -90,8 +94,7 @@ python3 scripts/deploy.py stop
 does not pause resources. It displays a destroy plan and requires typing `destroy`
 before removing Cloud Run and applying the plan. It loads the same private variable
 file as `start`, and needs uv, Terraform and gcloud, but no Docker image or Muse
-credentials. The external demo-token secret, enabled project
-APIs, local configuration and private state backups remain. These retained cloud
+credentials. Enabled project APIs, local configuration and private state backups remain. These retained cloud
 services may still incur charges. A later `start` provisions resources again and
 automatically updates phone and worker configuration with the current service URL.
 Omitting `start`/`stop` retains the original `start` behavior.
@@ -138,21 +141,20 @@ backend/.venv/bin/python scripts/deploy-gcp.py secrets --provider muse
 backend/.venv/bin/python scripts/deploy-gcp.py release --provider muse --model YOUR_MUSE_MAIN_MODEL
 ```
 
-Every phone-test release explicitly selects Muse and its model. Groq is still the
-legacy CLI default for development. The secrets command uploads a numbered Muse-key
-version and initializes the external demo-token secret once, using configured
-`DEMO_BEARER_TOKEN` or generating a random token. Later calls reuse its enabled
-version and restore runtime secret access. Bytes travel through stdin pipes, never
-arguments, logs, images or Terraform state. Set `demo_token_initialized = true` in
-private `deploy/terraform/terraform.tfvars` after initialization so Terraform manages
-its runtime accessor binding on later applies. The secret itself survives destroy.
+Register the Firebase JS client app in the same project and configure the public
+client values as described in [authentication setup](../docs/authentication.md).
+Run `deploy-gcp.py configure-auth` after provisioning to enable enumeration
+protection and the required password policy. Configure browser email templates and
+action domains in Firebase. A current verified test-user token must be supplied in
+`HOME_SAFETY_SMOKE_ID_TOKEN` to release, verify, rollback or generate phone settings.
+It stays in operator memory and is never written into client configuration.
 
-Only rotate deliberately with `secrets --provider muse --rotate-demo-token`.
-Revisions pin numbered versions; retain enabled versions needed for rollback. If
-the external secret itself is deleted, create a replacement token and update root
-`.env`. The shared token is client-visible; model keys are never public variables.
+Model-key uploads use numbered Secret Manager versions with values on stdin;
+there is no shared demo-token authentication. Preserve model-key versions needed
+for rollback. Before the first release, provision Scheduler recovery using the
+canonical service origin; the guided script resolves it from the project number.
+Account deletion needs this sweep even when segmentation is disabled.
 
-The initial release runs without segmentation to discover the service URL.
 Releases build unique immutable tags and deploy by
 digest. Existing services receive a tagged candidate without traffic; verification
 precedes promotion. Candidate failures preserve existing traffic. Post-promotion
@@ -174,7 +176,6 @@ Set that URL in private tfvars:
 
 ```hcl
 annotation_worker_url = "https://YOUR_SERVICE.run.app"
-demo_token_initialized = true
 ```
 
 Apply the recovery configuration before enabling segmentation:
@@ -186,8 +187,8 @@ backend/.venv/bin/python scripts/deploy-gcp.py release --provider muse --model Y
 ```
 
 The authenticated once-per-minute Scheduler sweep recovers persisted dispatch intent.
-Cloud Tasks uses Google OIDC to deliver independent finding attempts. The shared demo
-token cannot invoke internal worker routes. Firestore fences started attempts;
+Cloud Tasks uses Google OIDC to deliver independent finding attempts. Firebase user
+tokens cannot invoke internal worker routes. Firestore fences started attempts;
 expiry fails an attempt and only explicit user retry starts new model work. Queue
 concurrency 24 and Cloud Run concurrency 8 with 2 instances admit 12 overlapping
 attempts; cold starts/load may queue work (ADRs 0002/0003). Terraform supplies the
@@ -202,15 +203,12 @@ cd mobile
 npm run start:tunnel -- --go --clear
 ```
 
-`phone-env` verifies the Cloud Run service endpoint, then privately updates root
-`.env` with
-`EXPO_PUBLIC_DATA_SOURCE=api`, `EXPO_PUBLIC_API_URL=https://...run.app` and
-`EXPO_PUBLIC_DEMO_TOKEN` matching the serving revision's pinned token. It also aligns
-`DEMO_BEARER_TOKEN` for local use, retaining other settings. Model keys stay backend-only.
-All npm Expo launch commands load only root `EXPO_PUBLIC_` entries. Inherited process
-variables take precedence; `mobile/.env` is unnecessary and ignored. Restart Expo
-after changes. Scan the QR code using Android Expo Go compatible with SDK 57.
-Keep the development computer/tunnel running for repeated phone tests.
+`phone-env` verifies the serving API using the operator's test-user token, then
+writes API mode, the current service URL and Firebase project ID to the root `.env`.
+Set the public Firebase app key/app ID/auth domain separately. It removes legacy
+demo-token entries. All npm launch commands load only root `EXPO_PUBLIC_` entries.
+Native secure persistence and Expo Go compatibility require device verification;
+see [authentication setup](../docs/authentication.md) before release.
 
 Explore assessments, text/photo follow-ups, user reviews, highlights, checklist
 updates, restart persistence and deletion. Model requests consume quota; these
@@ -225,15 +223,13 @@ backend/.venv/bin/python scripts/deploy-gcp.py verify
 backend/.venv/bin/python scripts/deploy-gcp.py rollback PREVIOUS_REVISION
 ```
 
-The verifier rejects missing/invalid tokens, checks authenticated health and disabled
-docs, then creates/reads/retrieves/scopes/deletes a tiny Firestore/GCS assessment/photo
-fixture without a model request. Another device cannot read the assessment or photo.
-Cleanup runs on failure; if cleanup fails, fixture identifiers allow explicit deletion
-after fixing storage access. HTTPS requests validate the TLS certificate for the
-Cloud Run service URL.
+The verifier checks public liveness, missing/invalid user-token rejection, disabled
+docs and protected private storage CRUD using a verified test account. Its fixture
+is removed without a model call. Cross-account isolation is covered with local
+Auth/storage emulators; repeat with two cloud test users before release.
 
-Rollback verifies the target with its original pinned token version before restoring
-traffic; it does not roll back data. Run one release/rollback at a time and retain
+Rollback rejects legacy demo-auth revisions and verifies the target with a current
+Firebase token before restoring traffic; it does not roll back data. Run one release/rollback at a time and retain
 needed revisions/images/versions. Scale-to-zero retains data/photos. Registry,
 storage and secrets can incur ongoing charges.
 No automatic teardown or hard spending cap is configured.
@@ -250,7 +246,7 @@ The wrapper warns about assessment/photo deletion, creates/displays a destroy pl
 requires typing `destroy`, invokes `deploy-gcp.py delete-service` first and applies
 the plan only after successful service removal. No current image is required.
 Firestore deletion protection is disabled and bucket destruction includes objects.
-The external demo-token secret remains.
+Any historical unmanaged demo-token secret remains unused and can be retired separately.
 
 ## Local checks
 

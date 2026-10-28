@@ -1,3 +1,5 @@
+import { AuthProvider, useAuth } from "@/auth/context";
+import { AuthScreen } from "@/auth/screen";
 import { apiEnabled } from "@/api/config";
 import { useEffect, useState } from "react";
 import { AccessibilityInfo, ActivityIndicator, View } from "react-native";
@@ -76,6 +78,12 @@ function Navigation() {
               onPress={() => router.push("/preview")}
               disabled={busy}
             />
+          ) : apiEnabled ? (
+            <Button
+              label="Account"
+              variant="text"
+              onPress={() => router.push("/account")}
+            />
           ) : null,
       }}
     >
@@ -83,6 +91,7 @@ function Navigation() {
         name="index"
         options={{ title: "Home Safety", headerBackVisible: false }}
       />
+      <Stack.Screen name="account" options={{ title: "Account" }} />
       <Stack.Screen name="capture" options={{ title: "Your room" }} />
       <Stack.Screen name="confirm" options={{ title: "Ready to review" }} />
       <Stack.Screen
@@ -114,9 +123,16 @@ function Navigation() {
     </Stack>
   );
 }
-export default function RootLayout() {
+function AssessmentLayout() {
+  const auth = useAuth();
   return (
-    <PreviewProvider>
+    <PreviewProvider
+      key={apiEnabled ? auth.scope : "preview"}
+      session={{
+        ...auth,
+        scope: apiEnabled ? auth.scope : "home-safety-preview-v1",
+      }}
+    >
       <ThemeProvider
         value={{
           ...DefaultTheme,
@@ -152,5 +168,39 @@ export default function RootLayout() {
         </View>
       </ThemeProvider>
     </PreviewProvider>
+  );
+}
+
+function AuthGate() {
+  const auth = useAuth();
+  if (apiEnabled && !auth.ready)
+    return (
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          padding: 24,
+          backgroundColor: colors.background,
+        }}
+      >
+        <ActivityIndicator color={colors.accent} />
+        <Copy>{auth.message || "Opening your account…"}</Copy>
+      </View>
+    );
+  if (
+    apiEnabled &&
+    (auth.blocked ||
+      auth.receipt ||
+      auth.accountRestricted ||
+      !auth.user?.emailVerified)
+  )
+    return <AuthScreen account={auth.accountRestricted} />;
+  return <AssessmentLayout />;
+}
+export default function RootLayout() {
+  return (
+    <AuthProvider>
+      <AuthGate />
+    </AuthProvider>
   );
 }

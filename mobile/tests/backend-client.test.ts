@@ -13,7 +13,7 @@ const id = "11111111-1111-4111-8111-111111111111";
 test("API invokes fetch without a client receiver, as required by browser fetch", async () => {
   let receiver: unknown;
   const client = new BackendClient(
-    { baseUrl: "http://localhost:8000", demoToken: "", deviceId: id },
+    { baseUrl: "http://localhost:8000", getToken: async () => "" },
     async () => {},
     async function (this: unknown) {
       receiver = this;
@@ -86,7 +86,7 @@ test("server mapping updates findings while preserving unsent evidence and local
 test("API sends bearer/device headers and uploads a stable assessment ID without a forced multipart content type", async () => {
   const requests: { url: string; init: RequestInit }[] = [];
   const client = new BackendClient(
-    { baseUrl: "http://localhost:8000", demoToken: "demo-only", deviceId: id },
+    { baseUrl: "http://localhost:8000", getToken: async () => "demo-only" },
     async (form) => {
       form.append(
         "photo",
@@ -104,7 +104,7 @@ test("API sends bearer/device headers and uploads a stable assessment ID without
   assert.equal(saved.id, id);
   const headers = new Headers(requests[0].init.headers);
   assert.equal(headers.get("Authorization"), "Bearer demo-only");
-  assert.equal(headers.get("X-Device-ID"), id);
+  assert.equal(headers.get("X-Device-ID"), null);
   assert.equal(headers.has("Content-Type"), false);
   const form = requests[0].init.body as FormData;
   assert.equal(form.get("assessment_id"), id);
@@ -121,7 +121,7 @@ test("latest 404 means no assessment; auth and model failures are errors with no
   let calls = 0;
   let status = 404;
   const client = new BackendClient(
-    { baseUrl: "http://localhost:8000", demoToken: "", deviceId: id },
+    { baseUrl: "http://localhost:8000", getToken: async () => "" },
     async () => {},
     (async () => {
       calls += 1;
@@ -161,13 +161,13 @@ test("submitted server evidence stays frozen and private photos are downloaded w
   assert.equal(assessment.findings[0].submissions[0].frozen, true);
   let requests = 0;
   const client = new BackendClient(
-    { baseUrl: "http://localhost:8000", demoToken: "demo", deviceId: id },
+    { baseUrl: "http://localhost:8000", getToken: async () => "demo" },
     async () => {
       assert.fail("Saved evidence must not be uploaded again");
     },
     (async (_url, init) => {
       requests += 1;
-      assert.equal(new Headers(init!.headers).get("X-Device-ID"), id);
+      assert.equal(new Headers(init!.headers).get("X-Device-ID"), null);
       assert.equal(
         new Headers(init!.headers).get("Authorization"),
         "Bearer demo",

@@ -1,4 +1,4 @@
-"""Authenticated local container liveness check; never print the token."""
+"""Public local container liveness check; returns no user data."""
 
 import json
 import os
@@ -7,10 +7,8 @@ from urllib.request import Request, urlopen
 
 
 def main():
-    token = os.environ.get("DEMO_BEARER_TOKEN", "")
     request = Request(
         f"http://127.0.0.1:{int(os.environ.get('PORT', '8080'))}/health",
-        headers={"Authorization": f"Bearer {token}"} if token else {},
     )
     try:
         with urlopen(request, timeout=4) as response:

@@ -84,11 +84,11 @@ that configured project's default database. Put shared settings in the root
 
 ## HTTP contract
 
-All assessment endpoints require `X-Device-ID`, a persistent client-generated
-UUID for the app installation. Resource IDs are UUIDs. Device scoping applies
-to every read, write, photo download, and deletion; it is not authenticated
-identity. If `DEMO_BEARER_TOKEN` is configured, send `Authorization: Bearer <token>`
-on every API request, including health checks. OpenAPI docs contain no secrets.
+Assessment endpoints require `Authorization: Bearer <Firebase ID token>` for a
+verified email/password account. Resource IDs remain UUIDs; Firebase UIDs are
+opaque and server-controlled. Device headers have no authorization effect.
+`/health` is public liveness. Internal workers use service OIDC.
+See [account setup and deletion](../docs/authentication.md).
 
 Responses use snake_case fields. The mobile API client maps these to its
 camelCase domain model and uses the server's saved assessment state.
@@ -98,20 +98,20 @@ For local Expo web, CORS allows `http://localhost:8081` and
 `CORS_ORIGINS` to a JSON array of exact origins in the backend environment.
 Production has no default allowed origins. Native Android requests do not need
 browser CORS. See the [frontend guide](../docs/frontend-development.md) for API
-URL, token, and physical-device networking configuration.
+URL, managed account, and physical-device networking configuration.
 
 | Method and path | Input / behavior |
 | --- | --- |
 | `GET /health` | Liveness only; no model call or storage readiness guarantee |
 | `POST /v1/assessments` | Multipart `assessment_id`, `photo`, optional `profiles` JSON array, `household_context`; retains upload and returns `ready` |
-| `GET /v1/assessments/latest` | Latest assessment for this device; skips deletions in progress; 404 if none |
+| `GET /v1/assessments/latest` | Latest assessment for this account; skips deletions in progress; 404 if none |
 | `GET /v1/assessments/{aid}` | Current state, findings and linked submissions |
 | `POST /v1/assessments/{aid}/analyze` | Runs initial analysis; same endpoint manually retries failures |
 | `PATCH /v1/assessments/{aid}/findings/{fid}` | JSON `status`: `open`, `resolved`, or `dismissed`, optional `note` (omitted preserves the current note; empty clears it) |
 | `POST /v1/assessments/{aid}/findings/{fid}/skip-follow-up` | Skips the agent's request |
 | `POST /v1/assessments/{aid}/findings/{fid}/submissions` | Multipart `submission_id`, `kind` (`follow-up` or `review`), optional `text` and `photo`; returns retained `ready` submission |
 | `POST /v1/assessments/{aid}/findings/{fid}/submissions/{sid}/analyze` | Runs or manually retries this linked check |
-| `GET /v1/assessments/{aid}/photos/{pid}` | Private photo bytes after device scoping |
+| `GET /v1/assessments/{aid}/photos/{pid}` | Private photo bytes after account ownership checks |
 | `DELETE /v1/assessments/{aid}` | Removes all associated photos, then the document; repeat until 204 on partial failure |
 
 Profiles are `Older adult`, `Child`, `Baby`, `Pet`, including multiple profiles;
@@ -123,20 +123,18 @@ references are generated and checked by the server.
 For example, from the repo root in another terminal (with a running backend):
 
 ```bash
-device_id=$(python3 -c 'import uuid; print(uuid.uuid4())')
 assessment_id=$(python3 -c 'import uuid; print(uuid.uuid4())')
 curl --fail-with-body http://127.0.0.1:8000/v1/assessments \
-  -H "X-Device-ID: $device_id" \
+  -H "Authorization: Bearer $FIREBASE_ID_TOKEN" \
   -F "assessment_id=$assessment_id" \
   -F 'profiles=["Older adult","Baby","Pet"]' \
   -F 'photo=@mobile/assets/rooms/living-room.jpg'
 curl --fail-with-body -X POST \
   "http://127.0.0.1:8000/v1/assessments/$assessment_id/analyze" \
-  -H "X-Device-ID: $device_id"
+  -H "Authorization: Bearer $FIREBASE_ID_TOKEN"
 ```
 
-Add your bearer header if configured. Reuse the same device ID on subsequent
-requests. A real analysis sends the photo to the selected model provider and consumes your quota.
+Obtain a current verified Firebase user token through the SDK before requests. A real analysis sends the photo to the selected model provider and consumes your quota.
 
 ## Retry and state rules
 
@@ -210,9 +208,9 @@ emulator persistence checks, and the opt-in live model smoke test.
 ## Production configuration
 
 Set `ENVIRONMENT=production`, the real `GOOGLE_CLOUD_PROJECT`,
-`FIRESTORE_DATABASE_ID`, `PHOTOS_BUCKET`, model settings, and `DEMO_BEARER_TOKEN`.
-Remove both emulator environment variables. Production rejects emulator endpoints
-and requires a bearer token. Google clients use Application Default Credentials
+`FIRESTORE_DATABASE_ID`, `PHOTOS_BUCKET`, model settings, and durable worker URL/queue/service identity.
+Remove all Auth/Firestore/GCS emulator environment variables. Production rejects
+emulator endpoints and requires verified managed user tokens on assessment routes. Google clients use Application Default Credentials
 from the Cloud Run service account; Terraform manages storage provisioning and
 private bucket configuration. The container binds `0.0.0.0:$PORT` and runs as a
 non-root user. Production disables `/docs`, `/redoc` and `/openapi.json`.

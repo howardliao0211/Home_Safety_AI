@@ -13,6 +13,7 @@ dependencies = [
   "pillow>=11,<13",
   "meta-sam-parser>=0.1,<1",
   "google-cloud-tasks>=2.19,<3",
+  "firebase-admin>=7,<8",
 ]
 
 [project.optional-dependencies]

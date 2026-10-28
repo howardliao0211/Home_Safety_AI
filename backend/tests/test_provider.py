@@ -155,8 +155,8 @@ def test_muse_factory_targets_meta_using_backend_key(monkeypatch):
         provider.close()
 
 
-def test_production_disallows_emulators_and_requires_demo_token():
-    with pytest.raises(ValidationError, match="DEMO_BEARER_TOKEN"):
+def test_production_disallows_emulators_and_requires_durable_cleanup():
+    with pytest.raises(ValidationError, match="Durable account cleanup"):
         Settings(
             _env_file=None,
             environment="production",
@@ -168,11 +168,13 @@ def test_production_disallows_emulators_and_requires_demo_token():
         Settings(
             _env_file=None,
             environment="production",
+            annotation_worker_url="https://worker.test",
+            annotation_worker_service_account="worker@test",
+            annotation_tasks_queue="queue",
             model_provider="muse",
             muse_api_key="test-key",
             muse_main_model="test-model",
             firestore_emulator_host="127.0.0.1:8080",
-            demo_bearer_token="demo",
         )
 
 

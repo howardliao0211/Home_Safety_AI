@@ -24,6 +24,7 @@ def test_data_survives_emulator_restart(photo_bytes, monkeypatch):
     path = f"/v1/assessments/{aid}"
     with TestClient(create_app(settings, provider=StubProvider())) as client:
         client.headers["X-Device-ID"] = device
+        client.headers["Authorization"] = "Bearer " + device
         response = client.post(
             "/v1/assessments",
             data={"assessment_id": aid},
@@ -47,6 +48,7 @@ def test_data_survives_emulator_restart(photo_bytes, monkeypatch):
         pytest.fail("Local storage services did not restart")
     with TestClient(create_app(settings, provider=StubProvider())) as client:
         client.headers["X-Device-ID"] = device
+        client.headers["Authorization"] = "Bearer " + device
         try:
             response = client.get(path)
             assert response.status_code == 200, response.text

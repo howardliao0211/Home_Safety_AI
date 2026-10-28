@@ -271,7 +271,12 @@ class AnnotationService:
             a.annotation_dispatch_pending = any(j.state in ACTIVE for j in a.annotations)
             return a
 
-        a = self.repository.mutate(device, assessment_id, claim, deadline=deadline)
+        try:
+            a = self.repository.mutate(device, assessment_id, claim, deadline=deadline)
+        except AppError as exc:
+            if exc.code == "account_deleting":
+                return
+            raise
         for expired_id in expired:
             self.cleanup(device, assessment_id, expired_id)
         if not claimed:
@@ -371,7 +376,11 @@ class AnnotationService:
                 )
                 return previous
 
-            self.repository.mutate(device, assessment_id, fail)
+            try:
+                self.repository.mutate(device, assessment_id, fail)
+            except AppError as failure:
+                if failure.code != "account_deleting":
+                    raise
         finally:
             # Losing/deletion-racing uploads cannot leave assets behind. A process
             # crash is handled by recover(), using the pre-reserved asset reference.
@@ -426,7 +435,12 @@ class AnnotationService:
         )
 
     def cleanup(self, device, assessment_id, annotation_id):
-        a = self.repository.get(device, assessment_id)
+        try:
+            a = self.repository.get(device, assessment_id)
+        except AppError as exc:
+            if exc.code != "account_deleting":
+                raise
+            a = None
         j = next((j for j in a.annotations if j.id == annotation_id), None) if a else None
         if (
             j
@@ -445,7 +459,7 @@ class AnnotationService:
     def pending(self):
         """Every active attempt, for recovery; each is claimed independently."""
         return [
-            (a.device_id, a.id, j.id)
+            (a.owner_uid, a.id, j.id)
             for a in self.repository.annotation_pending()
             for j in a.annotations
             if j.state in ACTIVE

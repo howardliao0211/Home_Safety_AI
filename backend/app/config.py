@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -28,7 +29,7 @@ class Settings(BaseSettings):
     firestore_emulator_host: str | None = None
     storage_emulator_host: str | None = None
     photos_bucket: str = "home-safety-local-photos"
-    demo_bearer_token: SecretStr | None = None
+    firebase_auth_emulator_host: str | None = None
     cors_origins: list[str] = []
 
     @model_validator(mode="after")
@@ -62,13 +63,22 @@ class Settings(BaseSettings):
         if self.annotation_worker_url and not self.annotation_worker_url.startswith("https://"):
             raise ValueError("Annotation worker URL must use HTTPS")
         if self.environment == "production":
-            if self.firestore_emulator_host or self.storage_emulator_host:
+            if not all(dispatch):
+                raise ValueError(
+                    "Durable account cleanup requires worker URL, service identity and queue in production"
+                )
+            if (
+                self.firestore_emulator_host
+                or self.storage_emulator_host
+                or self.firebase_auth_emulator_host
+                or os.getenv("FIREBASE_AUTH_EMULATOR_HOST")
+            ):
                 raise ValueError("Emulator endpoints are forbidden in production")
-            if not self.demo_bearer_token or not self.demo_bearer_token.get_secret_value():
-                raise ValueError("DEMO_BEARER_TOKEN is required in production")
         else:
             self.firestore_emulator_host = self.firestore_emulator_host or "127.0.0.1:8080"
             self.storage_emulator_host = self.storage_emulator_host or "http://127.0.0.1:4443"
             if not self.cors_origins:
                 self.cors_origins = ["http://localhost:8081", "http://127.0.0.1:8081"]
+        if self.firebase_auth_emulator_host:
+            os.environ["FIREBASE_AUTH_EMULATOR_HOST"] = self.firebase_auth_emulator_host
         return self

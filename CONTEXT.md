@@ -78,7 +78,7 @@ professional home safety inspection.”
 ## Technical direction
 
 - Mobile: Expo / React Native, with Android first for the physical-device demo.
-  iOS support is deferred.
+  Account flows target Android and iOS; native device verification remains required.
 - Backend: FastAPI, including the assessment controller, in a Docker container
   on GCP Cloud Run in `us-central1`, project `home-safety-ai`. Start with 1 CPU,
   2 GiB RAM, concurrency 8, minimum 0 and maximum 2 instances, and a 300-second
@@ -96,10 +96,12 @@ professional home safety inspection.”
   app accesses all assessment data through FastAPI. No SQLite or separate data disk.
   Local development uses the Firestore emulator and a GCS-compatible local service;
   preserve emulator data across graceful restarts. Cloud provisioning is deferred.
-- Device scope: each app installation has a persistent `device_id`, without
-  accounts or cross-device synchronisation. Scope assessment reads, uploads,
-  updates, photo retrieval, and deletion by that identifier so the app shows
-  only that device's records. This is MVP record scoping, not authenticated identity.
+- Account scope: managed Identity Platform/Firebase email/password accounts with
+  verified email. Firebase UID owns assessments, photos, submissions and highlights.
+  The same account reopens its latest assessment across Android/iOS installations;
+  live synchronization and a history browser remain excluded. Account namespaces
+  are separate from legacy device data, which is never automatically imported.
+  See `docs/authentication.md` for authentication, persistence and deletion.
 - Photo retention: retain initial, follow-up, and user-review photos with their
   assessment. User deletion removes the assessment and its associated photos.
   Store photos in a private regional GCS bucket accessed by the backend only.
@@ -107,12 +109,12 @@ professional home safety inspection.”
   retain recoverable photo versions. Database and photo deletion are separate
   operations: the backend must make deletion retryable across both stores.
 - Credentials: model API keys remain on the backend and secrets stay out of Git.
-- Demo transport: Cloud Run's managed HTTPS `run.app` endpoint. Public Cloud Run
-  invocation permits mobile access; FastAPI enforces a shared demo bearer token
-  and per-device assessment scoping. Production API docs are disabled. Google
-  sign-in, individual accounts and broader abuse controls remain outside the MVP.
-  API keys and the demo token use numbered Secret Manager versions; secret values
-  stay out of images and Terraform state. The image contains no local `.env`.
+- Transport authentication: public Cloud Run HTTPS invocation permits mobile
+  access; FastAPI verifies current Firebase user ID tokens with revocation checks.
+  `/health` is public liveness; internal workers use allowlisted service OIDC.
+  API docs are disabled in production. Model keys use numbered Secret Manager
+  versions and never enter images or clients. Account deletion uses a durable
+  tombstone, independent recovery sweep, and a limited status receipt.
 - Infrastructure: Terraform configuration and provider lockfile are versioned in
   Git; Terraform state remains local and ignored, with private backups required.
   Deletion guards are removed by explicit user request: Firestore deletion protection

@@ -29,9 +29,3 @@ variable "annotation_queue_name" {
     error_message = "Use 1 to 100 letters, digits, underscores or hyphens."
   }
 }
-
-variable "demo_token_initialized" {
-  description = "Enable Terraform runtime token IAM after the external token secret has been initialized."
-  type        = bool
-  default     = false
-}

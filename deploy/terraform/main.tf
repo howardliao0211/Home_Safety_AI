@@ -12,6 +12,8 @@ locals {
     "cloudresourcemanager.googleapis.com",
     "firestore.googleapis.com",
     "iam.googleapis.com",
+    "identitytoolkit.googleapis.com",
+    "firebase.googleapis.com",
     "run.googleapis.com",
     "secretmanager.googleapis.com",
     "storage.googleapis.com",
@@ -100,18 +102,6 @@ resource "google_secret_manager_secret" "backend" {
   depends_on = [google_project_service.required]
 }
 
-# Token container and versions are initialized by the release CLI and survive
-# destroy/recreate. Its runtime access binding has the infrastructure lifecycle.
-resource "google_secret_manager_secret_iam_member" "demo" {
-  project   = var.project_id
-  secret_id = "home-safety-demo-bearer-token"
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.backend.email}"
-  # Binding is created by the secrets command after first provisioning, because
-  # the independently managed secret need not exist yet.
-  count = var.demo_token_initialized ? 1 : 0
-}
-
 resource "google_secret_manager_secret_iam_member" "backend" {
   for_each  = google_secret_manager_secret.backend
   secret_id = each.value.id
@@ -190,4 +180,21 @@ resource "google_firestore_field" "annotation_dispatch" {
       query_scope = "COLLECTION_GROUP"
     }
   }
+}
+
+resource "google_identity_platform_config" "accounts" {
+  project = var.project_id
+  sign_in {
+    allow_duplicate_emails = false
+    email {
+      enabled           = true
+      password_required = true
+    }
+  }
+  depends_on = [google_project_service.required]
+}
+resource "google_project_iam_member" "backend_auth" {
+  project = var.project_id
+  role    = "roles/firebaseauth.admin"
+  member  = "serviceAccount:${google_service_account.backend.email}"
 }

@@ -79,7 +79,7 @@ settings = Settings(
     photos_bucket="home-safety-local-photos",
     firestore_emulator_host="127.0.0.1:8080",
     storage_emulator_host="http://127.0.0.1:4443",
-    demo_bearer_token="browser-integration-token",
+    firebase_auth_emulator_host="127.0.0.1:9099",
     cors_origins=["http://127.0.0.1:8082", "http://localhost:8082"],
 )
 app = create_app(settings, provider=provider)

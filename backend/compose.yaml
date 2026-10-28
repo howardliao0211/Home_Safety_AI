@@ -1,4 +1,15 @@
 services:
+  auth:
+    image: node:22-bookworm-slim
+    working_dir: /emulator
+    ports:
+      - "127.0.0.1:9099:9099"
+    volumes:
+      - ./firebase.json:/emulator/firebase.json:ro
+      - auth-data:/state
+      - auth-npm:/root/.npm
+    command: ["sh", "-c", "npx --yes firebase-tools@15.3.1 emulators:start --only auth --project $${GOOGLE_CLOUD_PROJECT:-home-safety-local} --import=/state --export-on-exit=/state"]
+    stop_grace_period: 45s
   firestore:
     image: gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cced7aefc06898a91efcfc942e6ab98537b3ec2d15d66ec54cffa62ac6d7f19b
     ports:
@@ -19,5 +30,7 @@ services:
       - photos-data:/storage
 
 volumes:
+  auth-data:
+  auth-npm:
   firestore-data:
   photos-data:

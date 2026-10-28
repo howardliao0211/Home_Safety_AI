@@ -14,6 +14,32 @@ from app.models.schemas import Assessment
 from app.storage.repository import check_size
 
 
+class StubIdentity:
+    """External managed identity boundary; real SDK covered by emulator tests."""
+
+    def __init__(self, settings=None):
+        pass
+
+    def verify(self, token):
+        from uuid import UUID
+
+        from app.errors import AppError
+
+        try:
+            UUID(token)
+        except ValueError:
+            raise AppError(401, "unauthorized", "Sign in again.") from None
+        return {"uid": token, "email_verified": True, "auth_time": 0}
+
+    def close(self):
+        pass
+
+
+@pytest.fixture(autouse=True)
+def managed_identity_boundary(monkeypatch):
+    monkeypatch.setattr("app.main.FirebaseIdentity", StubIdentity)
+
+
 class MemoryRepository:
     def __init__(self):
         self.records = {}
@@ -152,6 +178,7 @@ def rig(settings):
     app = create_app(settings, repository, photos, provider)
     with TestClient(app) as client:
         client.headers["X-Device-ID"] = str(uuid4())
+        client.headers["Authorization"] = "Bearer " + client.headers["X-Device-ID"]
         yield client, repository, photos, provider
 
 

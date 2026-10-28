@@ -35,6 +35,7 @@ def test_cloud_adapters_roundtrip_restart_and_delete(photo_bytes, monkeypatch):
     provider = StubProvider()
     with TestClient(create_app(config, provider=provider)) as client:
         client.headers["X-Device-ID"] = device
+        client.headers["Authorization"] = "Bearer " + device
         path = f"/v1/assessments/{aid}"
         try:
             response = client.post(
@@ -104,10 +105,7 @@ def test_real_model_photo_assessment_and_review(monkeypatch):
     provider = build_provider(config)
     with TestClient(create_app(config, provider=provider)) as client:
         client.headers["X-Device-ID"] = device
-        if config.demo_bearer_token:
-            client.headers["Authorization"] = (
-                f"Bearer {config.demo_bearer_token.get_secret_value()}"
-            )
+        client.headers["Authorization"] = "Bearer " + device
         path = f"/v1/assessments/{aid}"
         try:
             with (ROOT / "mobile/assets/rooms/living-room.jpg").open("rb") as image:

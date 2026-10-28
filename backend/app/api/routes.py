@@ -1,4 +1,3 @@
-import hmac
 import json
 from typing import Annotated, Literal
 from uuid import UUID
@@ -13,19 +12,21 @@ from app.models.schemas import AnnotationRequest, Assessment, FeedbackRequest, F
 from app.storage.photos import MAX_UPLOAD_BYTES, prepare_photo
 
 
-def authorize(request: Request, authorization: Annotated[str | None, Header()] = None):
-    token = request.app.state.settings.demo_bearer_token
-    if token and not hmac.compare_digest(
-        (authorization or "").encode(), f"Bearer {token.get_secret_value()}".encode()
-    ):
-        raise AppError(401, "unauthorized", "A valid demo bearer token is required.")
+def identity(request: Request, authorization: Annotated[str | None, Header()] = None):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise AppError(401, "unauthorized", "Sign in to continue.")
+    return request.app.state.identity.verify(authorization[7:])
 
 
-router = APIRouter(dependencies=[Depends(authorize)])
+def owner(request: Request, claims: Annotated[dict, Depends(identity)]) -> str:
+    if claims.get("email_verified") is not True:
+        raise AppError(403, "email_unverified", "Verify your email to continue.")
+    if hasattr(request.app.state, "accounts"):
+        request.app.state.accounts.accounts.require_active(claims["uid"])
+    return claims["uid"]
 
 
-def device_id(x_device_id: Annotated[UUID, Header()]) -> str:
-    return str(x_device_id)
+router = APIRouter()
 
 
 def service(request: Request) -> AssessmentService:
@@ -33,7 +34,7 @@ def service(request: Request) -> AssessmentService:
 
 
 Service = Annotated[AssessmentService, Depends(service)]
-Device = Annotated[str, Depends(device_id)]
+Owner = Annotated[str, Depends(owner)]
 
 
 def public(assessment: Assessment) -> dict:
@@ -42,7 +43,7 @@ def public(assessment: Assessment) -> dict:
         exclude={
             "lease",
             "input_hash",
-            "device_id",
+            "owner_uid",
             "annotations",
             "annotation_dispatch_pending",
             "annotation_commits",
@@ -80,7 +81,7 @@ def health():
 @router.post("/v1/assessments", status_code=201)
 def create_assessment(
     svc: Service,
-    device: Device,
+    device: Owner,
     assessment_id: Annotated[UUID, Form()],
     photo: Annotated[UploadFile, File()],
     profiles: Annotated[str, Form(max_length=200)] = "[]",
@@ -102,29 +103,29 @@ def create_assessment(
 
 
 @router.get("/v1/assessments/latest")
-def latest_assessment(svc: Service, device: Device):
+def latest_assessment(svc: Service, device: Owner):
     return public(svc.latest(device))
 
 
 @router.get("/v1/assessments/{assessment_id}")
-def get_assessment(assessment_id: UUID, svc: Service, device: Device):
+def get_assessment(assessment_id: UUID, svc: Service, device: Owner):
     return public(svc.get(device, str(assessment_id)))
 
 
 @router.post("/v1/assessments/{assessment_id}/analyze")
-def analyze(assessment_id: UUID, svc: Service, device: Device, request: Request):
+def analyze(assessment_id: UUID, svc: Service, device: Owner, request: Request):
     return public(svc.analyze(device, str(assessment_id), request.state.request_id))
 
 
 @router.patch("/v1/assessments/{assessment_id}/findings/{finding_id}")
 def patch_finding(
-    assessment_id: UUID, finding_id: UUID, patch: FindingPatch, svc: Service, device: Device
+    assessment_id: UUID, finding_id: UUID, patch: FindingPatch, svc: Service, device: Owner
 ):
     return public(svc.patch_finding(device, str(assessment_id), str(finding_id), patch))
 
 
 @router.post("/v1/assessments/{assessment_id}/findings/{finding_id}/skip-follow-up")
-def skip_follow_up(assessment_id: UUID, finding_id: UUID, svc: Service, device: Device):
+def skip_follow_up(assessment_id: UUID, finding_id: UUID, svc: Service, device: Owner):
     return public(svc.skip_follow_up(device, str(assessment_id), str(finding_id)))
 
 
@@ -133,7 +134,7 @@ def add_submission(
     assessment_id: UUID,
     finding_id: UUID,
     svc: Service,
-    device: Device,
+    device: Owner,
     submission_id: Annotated[UUID, Form()],
     kind: Annotated[Literal["follow-up", "review"], Form()],
     text: Annotated[str, Form(max_length=3000)] = "",
@@ -162,7 +163,7 @@ def analyze_submission(
     finding_id: UUID,
     submission_id: UUID,
     svc: Service,
-    device: Device,
+    device: Owner,
     request: Request,
 ):
     return public(
@@ -177,7 +178,7 @@ def analyze_submission(
 
 
 @router.get("/v1/assessments/{assessment_id}/photos/{photo_id}")
-def get_photo(assessment_id: UUID, photo_id: UUID, svc: Service, device: Device):
+def get_photo(assessment_id: UUID, photo_id: UUID, svc: Service, device: Owner):
     metadata, data = svc.get_photo(device, str(assessment_id), str(photo_id))
     return Response(
         data,
@@ -187,7 +188,7 @@ def get_photo(assessment_id: UUID, photo_id: UUID, svc: Service, device: Device)
 
 
 @router.delete("/v1/assessments/{assessment_id}", status_code=204)
-def delete_assessment(assessment_id: UUID, svc: Service, device: Device):
+def delete_assessment(assessment_id: UUID, svc: Service, device: Owner):
     svc.delete(device, str(assessment_id))
     return Response(status_code=204)
 
@@ -202,7 +203,7 @@ def request_annotation(
     body: AnnotationRequest,
     request: Request,
     response: Response,
-    device: Device,
+    device: Owner,
 ):
     result = request.app.state.annotations.request(
         device, str(assessment_id), str(finding_id), body, request.state.request_id
@@ -213,7 +214,7 @@ def request_annotation(
 
 @router.get(ANNOTATIONS + "/{annotation_id}")
 def get_annotation(
-    assessment_id: UUID, finding_id: UUID, annotation_id: UUID, request: Request, device: Device
+    assessment_id: UUID, finding_id: UUID, annotation_id: UUID, request: Request, device: Owner
 ):
     return public_annotation(
         request.app.state.annotations.get(
@@ -224,7 +225,7 @@ def get_annotation(
 
 @router.get(ANNOTATIONS + "/{annotation_id}/mask")
 def get_mask(
-    assessment_id: UUID, finding_id: UUID, annotation_id: UUID, request: Request, device: Device
+    assessment_id: UUID, finding_id: UUID, annotation_id: UUID, request: Request, device: Owner
 ):
     data = request.app.state.annotations.mask(
         device, str(assessment_id), str(finding_id), str(annotation_id)
@@ -243,8 +244,19 @@ def report_annotation(
     annotation_id: UUID,
     body: FeedbackRequest,
     request: Request,
-    device: Device,
+    device: Owner,
 ):
     return request.app.state.annotations.feedback(
         device, str(assessment_id), str(finding_id), str(annotation_id)
     )
+
+
+@router.post("/v1/account/deletion", status_code=202)
+def delete_account(request: Request, claims: Annotated[dict, Depends(identity)]):
+    return request.app.state.accounts.begin(claims)
+
+
+@router.post("/v1/account/deletion/status")
+def deletion_status(request: Request, x_deletion_receipt: Annotated[str, Header(max_length=200)]):
+    # Receipt is carried in a header, never in access-logged URLs.
+    return request.app.state.accounts.accounts.status(x_deletion_receipt)

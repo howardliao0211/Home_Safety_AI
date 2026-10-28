@@ -19,14 +19,22 @@ SPEC.loader.exec_module(deploy)
 class DeploymentTests(unittest.TestCase):
     def setUp(self):
         self.args = argparse.Namespace(
-            account="operator@example.com", model="muse-test",
+            account="operator@example.com",
+            model="muse-test",
             start_expo=False,
         )
         self.deployment = deploy.Deployment(self.args)
 
     def test_finish_checks_readiness_before_any_changes(self):
         with (
-            patch.object(deploy, "run", side_effect=["https://service.run.app", subprocess.CalledProcessError(1, ["verify"])]),
+            patch.object(
+                deploy,
+                "run",
+                side_effect=[
+                    "https://service.run.app",
+                    subprocess.CalledProcessError(1, ["verify"]),
+                ],
+            ),
             patch.object(self.deployment, "save_variables") as save,
             patch.object(self.deployment, "apply") as apply,
             patch.object(self.deployment, "release") as release,
@@ -47,7 +55,11 @@ class DeploymentTests(unittest.TestCase):
 
         with (
             patch.object(deploy, "run", side_effect=run),
-            patch.object(self.deployment, "save_variables", side_effect=lambda **values: events.append(values)),
+            patch.object(
+                self.deployment,
+                "save_variables",
+                side_effect=lambda **values: events.append(values),
+            ),
             patch.object(self.deployment, "apply", side_effect=lambda: events.append("apply")),
         ):
             self.deployment.finish()
@@ -65,24 +77,35 @@ class DeploymentTests(unittest.TestCase):
             root = Path(directory)
             state = root / "deploy/terraform/terraform.tfstate"
             state.parent.mkdir(parents=True)
-            state.write_text(json.dumps({
-                "resources": [{"type": "google_cloud_tasks_queue"}],
-                "outputs": {"deployment_config": {"value": {}}},
-            }))
+            state.write_text(
+                json.dumps(
+                    {
+                        "resources": [{"type": "google_cloud_tasks_queue"}],
+                        "outputs": {"deployment_config": {"value": {}}},
+                    }
+                )
+            )
             with (
                 patch.object(deploy, "ROOT", root),
-                patch.object(self.deployment, "output", return_value={
-                    "annotation_worker_url": "https://service.run.app",
-                }),
+                patch.object(
+                    self.deployment,
+                    "output",
+                    return_value={
+                        "annotation_worker_url": "https://service.run.app",
+                    },
+                ),
                 patch.object(self.deployment, "save_variables") as save,
                 patch.object(self.deployment, "apply"),
                 patch.object(self.deployment, "release") as release,
                 patch.object(deploy, "run") as run,
             ):
                 self.deployment.bootstrap()
-                self.assertEqual(save.call_args_list[0].kwargs, {
-                    "annotation_worker_url": "https://service.run.app",
-                })
+                self.assertEqual(
+                    save.call_args_list[0].kwargs,
+                    {
+                        "annotation_worker_url": "https://service.run.app",
+                    },
+                )
                 release.assert_called_once_with(highlights=True)
                 self.assertEqual(run.call_args.args[0][-1], "phone-env")
 
@@ -92,27 +115,42 @@ class DeploymentTests(unittest.TestCase):
                 root = Path(directory)
                 state = root / "deploy/terraform/terraform.tfstate"
                 state.parent.mkdir(parents=True)
-                state.write_text(json.dumps({
-                    "resources": [{"type": "google_storage_bucket"}],
-                    "outputs": {"project_id": {"value": "home-safety-ai"}},
-                }))
+                state.write_text(
+                    json.dumps(
+                        {
+                            "resources": [{"type": "google_storage_bucket"}],
+                            "outputs": {"project_id": {"value": "home-safety-ai"}},
+                        }
+                    )
+                )
                 variables = state.parent / "deploy.tfvars.json"
                 variables.write_text(json.dumps({"annotation_worker_url": saved_url}))
                 with (
                     patch.object(deploy, "ROOT", root),
                     patch.object(deploy, "VARIABLES", variables),
-                    patch.object(self.deployment, "output", side_effect=AssertionError("Output is missing")),
+                    patch.object(
+                        self.deployment,
+                        "output",
+                        return_value={
+                            "project_id": "home-safety-ai",
+                            "service_name": "home-safety-demo",
+                            "region": "us-central1",
+                        },
+                    ),
                     patch.object(self.deployment, "save_variables") as save,
                     patch.object(self.deployment, "apply") as apply,
                     patch.object(self.deployment, "release") as release,
-                    patch.object(deploy, "run"),
+                    patch.object(deploy, "run", return_value="123456"),
                 ):
                     self.deployment.bootstrap()
-                self.assertEqual(save.call_args_list[0].kwargs, {
-                    "annotation_worker_url": saved_url,
-                })
-                self.assertEqual(apply.call_count, 2)
-                release.assert_called_once_with(highlights=bool(saved_url))
+                self.assertEqual(
+                    save.call_args_list[0].kwargs,
+                    {
+                        "annotation_worker_url": saved_url,
+                    },
+                )
+                self.assertEqual(apply.call_count, 1 if saved_url else 2)
+                release.assert_called_once_with(highlights=True)
 
     def test_private_variables_preserve_existing_configuration(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -120,9 +158,13 @@ class DeploymentTests(unittest.TestCase):
             path.write_text(json.dumps({"project_id": "custom-project"}))
             with patch.object(deploy, "VARIABLES", path):
                 self.deployment.save_variables(annotation_worker_url="https://service.run.app")
-            self.assertEqual(json.loads(path.read_text()), {
-                "project_id": "custom-project", "annotation_worker_url": "https://service.run.app",
-            })
+            self.assertEqual(
+                json.loads(path.read_text()),
+                {
+                    "project_id": "custom-project",
+                    "annotation_worker_url": "https://service.run.app",
+                },
+            )
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_finish_rejects_invalid_service_url_before_changes(self):
@@ -148,8 +190,12 @@ class DeploymentTests(unittest.TestCase):
                 patch("sys.argv", ["deploy.py", "start"]),
                 patch.object(deploy.shutil, "which", return_value="installed"),
                 patch.object(deploy, "run", side_effect=run),
-                patch.object(deploy.Deployment, "bootstrap", side_effect=lambda: events.append("bootstrap")),
-                patch.object(deploy.Deployment, "finish", side_effect=lambda: events.append("finish")),
+                patch.object(
+                    deploy.Deployment, "bootstrap", side_effect=lambda: events.append("bootstrap")
+                ),
+                patch.object(
+                    deploy.Deployment, "finish", side_effect=lambda: events.append("finish")
+                ),
             ):
                 self.assertEqual(deploy.main(), 0)
                 self.assertEqual(deploy.main(), 0)
@@ -163,9 +209,14 @@ class DeploymentTests(unittest.TestCase):
             patch.object(Path, "exists", return_value=True),
         ):
             self.deployment.stop()
-        self.assertEqual(run.call_args.args[0], [
-            *self.deployment.terraform, "destroy", f"-var-file={deploy.VARIABLES}",
-        ])
+        self.assertEqual(
+            run.call_args.args[0],
+            [
+                *self.deployment.terraform,
+                "destroy",
+                f"-var-file={deploy.VARIABLES}",
+            ],
+        )
 
     def test_stop_needs_no_docker_model_or_image_build(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -174,7 +225,11 @@ class DeploymentTests(unittest.TestCase):
             with (
                 patch.object(deploy, "ROOT", Path(directory)),
                 patch("sys.argv", ["deploy.py", "stop"]),
-                patch.object(deploy.shutil, "which", side_effect=lambda name: prerequisites.append(name) or name),
+                patch.object(
+                    deploy.shutil,
+                    "which",
+                    side_effect=lambda name: prerequisites.append(name) or name,
+                ),
                 patch.object(deploy, "run", side_effect=lambda command: commands.append(command)),
                 patch.object(deploy.Deployment, "stop") as stop,
             ):
@@ -192,14 +247,22 @@ class DeploymentTests(unittest.TestCase):
             state.write_text(json.dumps({"resources": []}))
             with (
                 patch.object(deploy, "ROOT", root),
-                patch.object(self.deployment, "output") as output,
+                patch.object(
+                    self.deployment,
+                    "output",
+                    return_value={
+                        "project_id": "home-safety-ai",
+                        "service_name": "home-safety-demo",
+                        "region": "us-central1",
+                    },
+                ) as output,
                 patch.object(self.deployment, "save_variables"),
                 patch.object(self.deployment, "apply"),
                 patch.object(self.deployment, "release") as release,
-                patch.object(deploy, "run"),
+                patch.object(deploy, "run", return_value="123456"),
             ):
                 self.deployment.bootstrap()
-                output.assert_not_called()
+                output.assert_called_once_with("deployment_config")
                 release.assert_called_once()
 
 

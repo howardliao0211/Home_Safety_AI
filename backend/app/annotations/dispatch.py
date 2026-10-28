@@ -5,6 +5,7 @@ unauthenticated worker route. Queue recovery does not depend on mobile polling.
 """
 
 import json
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Request
 from google.auth.transport.requests import Request as GoogleRequest
@@ -31,7 +32,8 @@ class CloudTasksDispatcher:
                         "headers": {"Content-Type": "application/json"},
                         "body": json.dumps(
                             {
-                                "device_id": device,
+                                "version": 2,
+                                "owner_uid": device,
                                 "assessment_id": assessment_id,
                                 "annotation_id": annotation_id,
                             }
@@ -70,22 +72,25 @@ worker_router = APIRouter(dependencies=[Depends(worker_auth)])
 
 
 class Delivery(BaseModel):
-    device_id: str
+    version: Literal[2]
+    owner_uid: str
     assessment_id: str
     annotation_id: str
 
 
 @worker_router.post("/internal/annotations/work")
 def work(body: Delivery, request: Request):
-    request.app.state.annotations.work(body.device_id, body.assessment_id, body.annotation_id)
+    request.app.state.annotations.work(body.owner_uid, body.assessment_id, body.annotation_id)
     return {"accepted": True}
 
 
 @worker_router.post("/internal/annotations/recover")
 def recover(request: Request):
+    if hasattr(request.app.state, "accounts"):
+        request.app.state.accounts.recover()
     service = request.app.state.annotations
     service.reap_assets()
     for a in service.repository.annotation_pending():
         # Re-delivery is safe: expired claims become failed, never re-run.
-        service.dispatch(a.device_id, a.id)
+        service.dispatch(a.owner_uid, a.id)
     return {"accepted": True}

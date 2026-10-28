@@ -10,7 +10,7 @@ import { previewService } from "@/api/preview-service";
 import { BackendClient } from "@/api/backend-client";
 import { apiConfig, apiEnabled } from "@/api/config";
 import { appendPhoto } from "@/api/photo-upload";
-import { getDeviceId, newApiId } from "@/storage/device";
+import { newApiId } from "@/storage/device";
 import {
   completeSubmission,
   createAssessment,
@@ -25,11 +25,21 @@ import {
   type Photo,
   type Submission,
 } from "@/domain/model";
-import { persistence } from "@/storage/persistence";
-import { cleanPhotos, retainPhoto } from "@/storage/photos";
+import { createPersistence } from "@/storage/persistence";
+import { createPhotoStorage } from "@/storage/photos";
 import { StateStore } from "@/storage/state-store";
 
-function usePreviewState() {
+type Session = {
+  scope: string;
+  getToken: () => Promise<string>;
+  onAuthError: (error: import("@/api/backend-client").ApiError) => void;
+  registerCleanup: (cleanup: () => Promise<void>) => () => void;
+};
+function usePreviewState(session: Session) {
+  const persistence = useRef(createPersistence(session.scope)).current;
+  const { cleanPhotos, retainPhoto, removeLegacyPhotos } = useRef(
+    createPhotoStorage(session.scope),
+  ).current;
   const [state, setState] = useState<AppState>(emptyState);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -42,15 +52,16 @@ function usePreviewState() {
   const client = useRef<Promise<BackendClient> | null>(null);
   const backend = () => {
     if (!client.current) {
-      client.current = getDeviceId()
-        .then(
-          (deviceId) =>
-            new BackendClient({ ...apiConfig, deviceId }, appendPhoto),
-        )
-        .catch((error) => {
-          client.current = null;
-          throw error;
-        });
+      client.current = Promise.resolve(
+        new BackendClient(
+          {
+            ...apiConfig,
+            getToken: session.getToken,
+            onAuthError: session.onAuthError,
+          },
+          appendPhoto,
+        ),
+      );
     }
     return client.current;
   };
@@ -150,6 +161,10 @@ function usePreviewState() {
   }
   async function initialize() {
     await act(async () => {
+      if (apiEnabled) {
+        await persistence.removeLegacy();
+        await removeLegacyPhotos();
+      }
       await repository.load();
       if (apiEnabled) await refreshLatest();
       setReady(true);
@@ -157,7 +172,19 @@ function usePreviewState() {
     });
   }
   useEffect(() => {
+    const remove = session.registerCleanup(async () => {
+      repository.dispose();
+      (await client.current)?.dispose();
+      await repository.drained();
+      await persistence.clear();
+      await cleanPhotos([]);
+    });
     void initialize();
+    return () => {
+      remove();
+      repository.dispose();
+      void client.current?.then((c) => c.dispose());
+    };
   }, []);
 
   const update = (change: (state: AppState) => AppState) =>
@@ -505,8 +532,14 @@ function usePreviewState() {
 }
 type PreviewContextValue = ReturnType<typeof usePreviewState>;
 const PreviewContext = createContext<PreviewContextValue | null>(null);
-export function PreviewProvider({ children }: { children: ReactNode }) {
-  const value = usePreviewState();
+export function PreviewProvider({
+  children,
+  session,
+}: {
+  children: ReactNode;
+  session: Session;
+}) {
+  const value = usePreviewState(session);
   return (
     <PreviewContext.Provider value={value}>{children}</PreviewContext.Provider>
   );

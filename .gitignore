@@ -25,3 +25,6 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 backend/.local/
+
+# Local Firebase emulator diagnostics may contain development email-action links.
+firebase-debug.log*

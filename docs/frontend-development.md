@@ -31,8 +31,8 @@ reset local data. Scenario changes do not change an existing assessment.
 
 API assessments and photos persist through the backend's Firestore/GCS stores.
 The latest assessment is restored from the API, including when its local cache
-is absent. A persistent device UUID scopes the installation's records; clearing
-that identity loses access to those records. API and preview local state use
+is absent. A verified managed account owns records across installations; signing out clears
+that account’s local app-managed state. API and preview local state use
 separate namespaces. Browser drafts and cached photos persist in IndexedDB.
 Android metadata uses AsyncStorage, with selected photos copied into the app's document directory.
 Confirmed assessment deletion removes its records and photos; starting another
@@ -103,15 +103,17 @@ For the GCP phone test, use the [deployment guide](../deploy/README.md).
 | --- | --- |
 | `EXPO_PUBLIC_DATA_SOURCE` | `api` by default; `preview` enables fixtures explicitly |
 | `EXPO_PUBLIC_API_URL` | Defaults to `http://127.0.0.1:8000`; use a reachable host on Android |
-| `EXPO_PUBLIC_DEMO_TOKEN` | Match the backend's `DEMO_BEARER_TOKEN` if configured |
+| `EXPO_PUBLIC_FIREBASE_*` | Public Firebase app configuration in the backend identity project |
+| `EXPO_PUBLIC_AUTH_EMULATOR_URL` | Local development only; never production |
 
-The shared demo token is client-visible MVP access control. Keep Groq and Muse
+See [authentication setup](authentication.md) for registration, email verification,
+secure session persistence, account deletion and native checks. Keep Groq and Muse
 API credentials on the backend. Expo's `EXPO_PUBLIC_*` variables are included
 in client bundles and must never hold model keys. Production web origins need
 an explicit backend `CORS_ORIGINS` allowlist; local port 8081 is allowed by default.
 
 The API client maps DTOs, uploads retained photos, restores server state, and
-loads private photos using device and bearer headers. Initial and linked
+loads private photos using current Firebase ID-token headers. Initial and linked
 analysis failures preserve evidence and require a manual retry with the same
 IDs. Submitted evidence is immutable; a user-requested photo review remains
 available separately. Failed status saves stay visible without publishing a

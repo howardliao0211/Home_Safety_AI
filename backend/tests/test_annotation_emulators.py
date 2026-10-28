@@ -28,6 +28,7 @@ def test_queued_highlight_survives_api_restart_local_worker_and_asset_deletion(
     base = f"/v1/assessments/{aid}"
     with TestClient(create_app(config, provider=safety, highlight_provider=highlighting)) as client:
         client.headers["X-Device-ID"] = device
+        client.headers["Authorization"] = "Bearer " + device
         assert (
             client.post(
                 "/v1/assessments",
@@ -44,6 +45,7 @@ def test_queued_highlight_survives_api_restart_local_worker_and_asset_deletion(
         create_app(config, provider=StubProvider(), highlight_provider=highlighting)
     ) as client:
         client.headers["X-Device-ID"] = device
+        client.headers["Authorization"] = "Bearer " + device
         service = client.app.state.annotations
         try:
             assert any(a.id == aid for a in service.repository.annotation_pending())

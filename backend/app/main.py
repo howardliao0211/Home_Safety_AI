@@ -5,12 +5,14 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.accounts import AccountDeletion
 from app.annotations.dispatch import CloudTasksDispatcher, worker_router
 from app.annotations.provider import MuseHighlightProvider
 from app.annotations.service import AnnotationService
 from app.api.cors import ConfiguredCORS
 from app.api.routes import router
 from app.assessments.service import AssessmentService
+from app.auth import FirebaseIdentity
 from app.config import Settings
 from app.errors import AppError
 from app.models.providers.factory import build_provider
@@ -28,6 +30,7 @@ def create_app(
     provider=None,
     highlight_provider=None,
     dispatcher=None,
+    identity=None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app):
@@ -55,6 +58,11 @@ def create_app(
             images = photos or GCSPhotoStore(config)
             stack.callback(images.close)
             app.state.settings = config
+            app.state.identity = identity or FirebaseIdentity(config)
+            stack.callback(app.state.identity.close)
+            if hasattr(records, "accounts"):
+                images.account_guard = records.accounts.require_active
+                app.state.accounts = AccountDeletion(records, images, app.state.identity)
             highlighting = highlight_provider or (
                 MuseHighlightProvider(config)
                 if config.model_provider == "muse"

@@ -51,6 +51,7 @@ export function EvidencePhoto({
     <View style={{ width, height: width / ratio }}>
       {!!imageSource && (
         <Image
+          cachePolicy="none"
           source={imageSource}
           contentFit="contain"
           accessibilityLabel={photo.label}
@@ -63,6 +64,7 @@ export function EvidencePhoto({
       )}
       {!!mask && !error && (
         <Image
+          cachePolicy="none"
           source={{ uri: mask }}
           contentFit="contain"
           accessibilityLabel="AI-generated highlight"

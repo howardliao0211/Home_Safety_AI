@@ -1,3 +1,9 @@
+> Authentication cutover: the observations below predate managed accounts where
+> they describe device IDs/demo tokens. Current setup and pending Android/iOS
+> validation are in [authentication](authentication.md). Automated emulator checks
+> cover user ownership and deletion; historical device-auth results do not certify
+> the new account flows.
+
 # Frontend preview checks
 
 For the current connected API setup, see the verification entry at the end of

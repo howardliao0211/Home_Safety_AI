@@ -92,18 +92,18 @@ configuration):
 ```dotenv
 EXPO_PUBLIC_DATA_SOURCE=api
 EXPO_PUBLIC_API_URL=http://127.0.0.1:8000
-EXPO_PUBLIC_DEMO_TOKEN=
+EXPO_PUBLIC_AUTH_EMULATOR_URL=http://127.0.0.1:9099
+EXPO_PUBLIC_FIREBASE_PROJECT_ID=home-safety-local
+EXPO_PUBLIC_FIREBASE_API_KEY=local-emulator-key
+EXPO_PUBLIC_FIREBASE_APP_ID=home-safety-local
 ```
 
 Expo launch commands load only `EXPO_PUBLIC_` entries from that file. Explicit
 process environment overrides take precedence; `mobile/.env` is unnecessary and
-is ignored by these commands. Leave the demo token empty unless the backend
-requires it, then use the same value as `DEMO_BEARER_TOKEN`. Model credentials
-stay backend-only. Restart Expo after changing configuration.
-
-For an Android Expo Go test against GCP, follow the
-[phone deployment guide](deploy/README.md). It uses a stable HTTPS custom API
-hostname, a persistent demo token, and `npm run start:tunnel` from `mobile/`.
+is ignored by these commands. Register and verify a managed email/password account
+before assessment access. Model credentials stay backend-only. Restart Expo after
+changing configuration. See [account setup](docs/authentication.md) for local email
+actions, encrypted session persistence, deployment and native validation requirements.
 
 ## Test the frontend and backend locally
 
