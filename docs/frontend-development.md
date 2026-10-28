@@ -87,29 +87,9 @@ installed, the activation script uses it when the local runtime is absent.
 
 ## Check changes
 
-```bash
-npm run typecheck
-npm test
-npm run test:e2e
-npx expo install --check
-npx expo-doctor
-npx expo export --platform web --platform android
-```
-
-Build output is ignored by Git. Android bundling can be checked with
-`npx expo export --platform android` without installing an Android SDK.
-
-For browser tests, first install Chromium with `npx playwright install chromium`.
-Playwright starts its own preview Expo server on port 8083. Tests run at phone
-and desktop widths; screenshots and failure traces go into ignored `.tools/`.
-Physical-device checks and observed limitations are recorded in `docs/demo.md`.
-
-For connected browser journeys, install backend dependencies and start the
-storage emulators as described in the backend guide, then run
-`npm run test:e2e:api`. It starts its own API on 8001 and Expo on 8082. The
-fixture exercises real HTTP and emulator storage with a deterministic model;
-it does not call Muse or Groq or measure detection accuracy. It uses separate device
-IDs and deletes its test assessments. Keep ports 8001, 8082, and 8083 free.
+See [frontend checks](test/frontend.md) for TypeScript, unit and browser tests,
+Expo compatibility, and exports. See [manual and device testing](test/manual.md)
+for the connected assessment checklist and device journeys.
 
 ## Backend integration
 

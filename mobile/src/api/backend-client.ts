@@ -136,7 +136,9 @@ export class BackendClient {
       headers.set("X-Device-ID", this.config.deviceId);
       if (this.config.demoToken)
         headers.set("Authorization", `Bearer ${this.config.demoToken}`);
-      const response = await this.fetcher(this.config.baseUrl + path, {
+      // Browser fetch rejects a BackendClient instance as its receiver.
+      const fetcher = this.fetcher;
+      const response = await fetcher(this.config.baseUrl + path, {
         ...init,
         headers,
         signal: abort.signal,

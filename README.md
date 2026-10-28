@@ -16,6 +16,9 @@ examples and works without a backend or credentials.
 - Git and a local checkout of this repository.
 - Node.js **24.22.1**, pinned in [`.nvmrc`](.nvmrc), with its bundled npm.
   Install it from [Node.js](https://nodejs.org/) or use your Node version manager.
+- Python **3.10+** and [uv](https://docs.astral.sh/uv/) for the backend.
+- Docker Engine with Compose for the Firestore and photo-storage emulators.
+  On WSL, start Docker Desktop and enable integration for your distro.
 - A browser for web preview.
 - Optional: an Android phone with an Expo Go version compatible with the
   project's Expo SDK **57**, available through [Expo Go](https://expo.dev/go).
@@ -23,7 +26,7 @@ examples and works without a backend or credentials.
 Android Studio is only needed if you want to use an Android emulator. Browser
 preview and a physical phone running Expo Go do not require it.
 
-### Install dependencies
+### Frontend dependencies
 
 Open a terminal at the repository root. If you use nvm, select the pinned Node
 version first:
@@ -63,36 +66,29 @@ For WSL development, use Linux Node and npm inside WSL. If npm reports a WSL or
 Node installation-directory error, check `command -v node` and `command -v npm`:
 they should point to Linux executables, rather than Windows paths under `/mnt/c/`.
 
-## Test the frontend and backend locally
+### Backend dependencies and configuration
 
-Use two terminals, starting each in the repository root. You need Python 3.10+,
-[uv](https://docs.astral.sh/uv/), Docker Engine with Compose, and the frontend
-dependencies installed above. On WSL, start Docker Desktop and enable its WSL
-integration for your distro. Confirm `docker compose version` works in WSL.
-
-### Terminal 1: storage and backend
-
-If the root `.env` does not exist, copy `.env.example` to `.env`. Edit it locally
-to set `MODEL_PROVIDER=muse`, `MUSE_API_KEY`, and `MUSE_MAIN_MODEL`. Preserve any
-existing credentials; model keys belong only in the backend environment.
+From the repository root, confirm Docker Compose is available and install the
+backend dependencies:
 
 ```bash
-docker compose -f backend/compose.yaml up -d
+docker compose version
 cd backend
 uv sync --extra dev --locked
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Keep this terminal running. Local API docs are at
-<http://127.0.0.1:8000/docs>; liveness is at
-<http://127.0.0.1:8000/healthz>. If you configured `DEMO_BEARER_TOKEN`, API
-requests, including health checks, require its bearer header. See the
-[backend guide](backend/README.md#start-locally) for storage settings and logs.
+If the root `.env` does not exist, copy `.env.example` to `.env`. Configure
+`MODEL_PROVIDER=muse`, `MUSE_API_KEY`, and `MUSE_MAIN_MODEL` there. To use Groq,
+set `MODEL_PROVIDER=groq`, `GROQ_API_KEY`, and `GROQ_MODEL` instead. Preserve
+existing credentials; model keys belong only in the backend environment.
+See the [backend guide](backend/README.md#start-locally) for storage settings
+and provider configuration.
 
-### Terminal 2: frontend
+### Frontend configuration
+
+From the repository root:
 
 ```bash
-source scripts/frontend-env.sh
 cd mobile
 # Only if mobile/.env does not already exist:
 cp .env.example .env
@@ -103,125 +99,45 @@ Confirm these settings in `mobile/.env`:
 ```dotenv
 EXPO_PUBLIC_DATA_SOURCE=api
 EXPO_PUBLIC_API_URL=http://127.0.0.1:8000
+EXPO_PUBLIC_DEMO_TOKEN=
 ```
 
-If the backend has
-`DEMO_BEARER_TOKEN` configured, set the matching `EXPO_PUBLIC_DEMO_TOKEN` in
-`mobile/.env`. This shared demo token is client-visible; never put model API
-keys in the frontend. Restart Expo after changing its environment.
+Leave `EXPO_PUBLIC_DEMO_TOKEN` empty unless the backend has
+`DEMO_BEARER_TOKEN` configured; if configured, set both to the same value.
+The shared demo token is client-visible. Never put model API keys in the
+frontend. Restart Expo after changing its environment.
+
+## Test the frontend and backend locally
+
+After completing setup above, run from the repository root on Linux or WSL:
 
 ```bash
-npm run web
+python3 scripts/local-test.py start
 ```
 
-Open the localhost URL printed by Expo, usually `http://localhost:8081`.
-Use port 8081 for the documented local CORS defaults.
+The script starts the storage emulators, API on port 8000, and frontend on port
+8081 in the background. Open <http://localhost:8081> on the development machine
+once it reports ready. Logs are saved under `.tools/local-test/`.
+Stop any manually started API or frontend first; the script reports port
+conflicts rather than replacing existing servers.
 
 Choose **Start with a room**, select a photo or bundled sample, choose optional
-household profiles, and create an assessment. This sends a real request to the selected model provider
-and consumes model quota. Check that findings appear, resolve/dismiss actions
-survive reload, a linked follow-up updates its finding, and confirmed deletion
-removes the assessment. Failed analysis retains the input and offers an explicit
-Retry action.
+household profiles, and create an assessment. This calls the selected model
+provider and consumes model quota. Local API docs are at
+<http://127.0.0.1:8000/docs>; liveness is at
+<http://127.0.0.1:8000/healthz>. If configured, the demo bearer token is required
+for API requests, including health checks.
 
-If the app shows **Retry connecting**, check that both emulator containers and
-Uvicorn are running, the API URL is correct, and the demo tokens match. A model
-quota error requires a manual retry after cooldown.
-
-### Automated connected test without model calls
-
-With the storage emulators running and backend/frontend dependencies installed,
-run from `mobile/`:
+To stop the managed frontend, API, and storage emulators:
 
 ```bash
-npx playwright install chromium
-npm run test:e2e:api
+python3 scripts/local-test.py stop
 ```
 
-This starts its own test API on 8001 and frontend on 8082 with a deterministic
-model. Keep those ports free. It checks integration behavior without calling
-Muse or Groq; it does not verify live model output.
-
-### Stop local testing
-
-Stop the frontend and Uvicorn with **Ctrl+C** in their terminals. From the
-repository root, stop storage gracefully so local data is preserved:
-
-```bash
-docker compose -f backend/compose.yaml stop
-```
-
-## Run the frontend separately
-
-Run the following commands from `mobile/`.
-
-### Browser preview without the backend
-
-For fixture-only demos without the API, run:
-
-```bash
-EXPO_PUBLIC_DATA_SOURCE=preview npm run web
-```
-
-In preview mode only, **Preview** in the development header selects scenarios
-or resets local preview data. The selected photo is not analysed in this mode.
-
-### Android phone
-
-```bash
-npm start
-```
-
-Set `EXPO_PUBLIC_API_URL` to the development machine's reachable LAN address
-with port 8000 and bind Uvicorn to `0.0.0.0`. For an Android emulator, use
-`http://10.0.2.2:8000`. A phone's `localhost` refers to the phone itself.
-Connect the phone and development machine to the same network, then scan the
-terminal's QR code with Expo Go. If WSL networking or a firewall prevents the
-phone from reaching the LAN address, use the installed tunnel support:
-
-```bash
-npm run start:tunnel
-```
-
-Tunneling requires internet access and exposes the development server through
-a temporary public URL. It tunnels Expo only; the phone still needs a reachable
-API URL. Stop the server when finished.
-
-For an emulator, first configure Android Studio, the Android SDK, and `adb`,
-start an emulator, then run `npm run android`.
-
-## Development checks
-
-From `mobile/`:
-
-```bash
-npm run typecheck
-npm test
-```
-
-Install the test browser once, then run the browser journeys:
-
-```bash
-npx playwright install chromium
-npm run test:e2e
-# Requires backend dependencies and running storage emulators; no model calls:
-npm run test:e2e:api
-```
-
-The preview browser runner starts its own Expo server on port 8083. The API
-suite starts a deterministic model fixture on 8001 and Expo on 8082, using real
-storage emulators on 8080 and 4443. Screenshots and test artifacts are written
-to the ignored `.tools/` directory. Neither suite calls Muse or Groq.
-
-Check Expo compatibility and build both targets without an Android SDK:
-
-```bash
-npx expo install --check
-npx expo-doctor
-npx expo export --platform web --platform android
-```
-
-Use `npm run format` to format the frontend source and tests.
+Storage stops gracefully and preserves emulator data. See the
+[local stack script guide](docs/test/local-stack.md) for logs and troubleshooting,
+and [testing guides](docs/test/README.md) for automated checks, manual journeys,
+preview mode, and Android device testing.
 
 ## Project layout
 
@@ -235,22 +151,6 @@ Use `npm run format` to format the frontend source and tests.
 | `mobile/src/storage/` | Local persistence and photo retention |
 | `mobile/tests/` | State tests and browser journeys |
 | `backend/` | FastAPI assessment backend, Muse/Groq adapters, Firestore/GCS storage and tests |
+| `scripts/local-test.py` | Start and stop the local frontend, API, and storage stack |
+| `docs/test/` | Automated checks, manual journeys, and device testing |
 | `deploy/terraform/` | Shared Cloud Run infrastructure, storage, registry and secret IAM |
-
-API mode retains assessment state and photos through the backend, scoped by a
-persistent device ID. Preview data stays on the device. Each mode uses separate
-local state; reloads retain assessments and checklist actions. Confirmed deletion
-removes the selected assessment and its associated photos.
-
-See the [frontend development guide](docs/frontend-development.md) for more
-detail, [demo notes](docs/demo.md) for verified behavior and pending device
-checks, and [CONTEXT.md](CONTEXT.md) for product requirements and the planned
-backend architecture.
-
-See the [backend development guide](backend/README.md) to run the Muse-backed
-API locally, inspect its endpoints, or explicitly switch to Groq.
-The frontend uses this API by default; preview mode remains available explicitly.
-
-See the [Cloud Run deployment guide](deploy/README.md) for the production Docker
-image, separate Terraform provisioning, Secret Manager setup, verified releases
-and rollback. The deployment script is `scripts/deploy-gcp.py`.

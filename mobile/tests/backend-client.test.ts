@@ -9,6 +9,22 @@ import {
 import { IdentityStore } from "../src/storage/identity-store";
 
 const id = "11111111-1111-4111-8111-111111111111";
+
+test("API invokes fetch without a client receiver, as required by browser fetch", async () => {
+  let receiver: unknown;
+  const client = new BackendClient(
+    { baseUrl: "http://localhost:8000", demoToken: "", deviceId: id },
+    async () => {},
+    async function (this: unknown) {
+      receiver = this;
+      return Response.json({ error: { code: "not_found" } }, { status: 404 });
+    },
+  );
+
+  assert.equal(await client.latest(), null);
+  assert.equal(receiver, undefined);
+});
+
 function remote(): RemoteAssessment {
   return {
     id,
