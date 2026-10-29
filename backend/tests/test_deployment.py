@@ -1,7 +1,9 @@
+import base64
 import importlib.util
 import json
 import subprocess
 import sys
+import time
 
 import httpx
 import pytest
@@ -15,6 +17,57 @@ spec = importlib.util.spec_from_file_location("deploy_gcp", ROOT / "scripts/depl
 deploy = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = deploy
 spec.loader.exec_module(deploy)
+
+
+def smoke_jwt(**claims):
+    payload = {"exp": time.time() + 3600, "email_verified": True, **claims}
+    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    return f"header.{encoded}.signature"
+
+
+def test_smoke_token_can_sign_in_from_private_settings(tmp_path, monkeypatch):
+    monkeypatch.setattr(deploy, "ROOT", tmp_path)
+    monkeypatch.delenv("HOME_SAFETY_SMOKE_ID_TOKEN", raising=False)
+    (tmp_path / ".env").write_text(
+        "HOME_SAFETY_SMOKE_EMAIL=test@example.com\n"
+        "HOME_SAFETY_SMOKE_PASSWORD=private-test-password\n"
+        "EXPO_PUBLIC_FIREBASE_API_KEY=test-cloud-key\n"
+    )
+    token = smoke_jwt()
+    calls = []
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs))
+        return httpx.Response(200, json={"idToken": token})
+
+    monkeypatch.setattr(deploy.httpx, "post", post)
+    assert deploy.Deployer.smoke_token() == token
+    assert calls[0][0] == "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword"
+    assert calls[0][1]["json"]["password"] == "private-test-password"
+    assert calls[0][1]["json"]["returnSecureToken"] is True
+
+
+@pytest.mark.parametrize("claims", [{"exp": 1}, {"email_verified": False}])
+def test_smoke_preflight_rejects_expired_or_unverified_tokens(tmp_path, monkeypatch, claims):
+    monkeypatch.setattr(deploy, "ROOT", tmp_path)
+    monkeypatch.setenv("HOME_SAFETY_SMOKE_ID_TOKEN", smoke_jwt(**claims))
+    with pytest.raises(deploy.DeploymentError):
+        deploy.Deployer.smoke_token()
+
+
+def test_smoke_signin_failure_does_not_relay_credentials(tmp_path, monkeypatch):
+    monkeypatch.setattr(deploy, "ROOT", tmp_path)
+    monkeypatch.delenv("HOME_SAFETY_SMOKE_ID_TOKEN", raising=False)
+    for name, value in {
+        "HOME_SAFETY_SMOKE_EMAIL": "test@example.com",
+        "HOME_SAFETY_SMOKE_PASSWORD": "private",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "test",
+    }.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(deploy.httpx, "post", lambda *a, **kw: httpx.Response(400, text="private"))
+    with pytest.raises(deploy.DeploymentError, match="HTTP 400") as error:
+        deploy.Deployer.smoke_token()
+    assert "private" not in str(error.value)
 
 
 @pytest.fixture
@@ -31,6 +84,39 @@ def config():
         annotation_worker_url="https://test.run.app",
         annotation_tasks_queue="projects/test-project/locations/us-central1/queues/highlights",
     )
+
+
+def test_auth_configuration_uses_identity_platform_rest_password_policy_schema(config, monkeypatch):
+    """The admin REST API rejects the SDK's enforcementState/constraints names."""
+    runner = deploy.Deployer(config)
+    monkeypatch.setattr(runner, "gcloud", lambda *args: "fake-operator-token")
+
+    def patch(url, *, params, headers, json, timeout):
+        assert url == "https://identitytoolkit.googleapis.com/admin/v2/projects/test-project/config"
+        assert params["updateMask"] == "emailPrivacyConfig,passwordPolicyConfig"
+        assert json["emailPrivacyConfig"]["enableImprovedEmailPrivacy"] is True
+        policy = json["passwordPolicyConfig"]
+        if set(policy) != {
+            "passwordPolicyEnforcementState",
+            "passwordPolicyVersions",
+            "forceUpgradeOnSignin",
+        }:
+            return httpx.Response(400, json={"error": {"message": "Unknown policy fields"}})
+        assert policy["passwordPolicyEnforcementState"] == "ENFORCE"
+        assert policy["forceUpgradeOnSignin"] is False
+        assert len(policy["passwordPolicyVersions"]) == 1
+        assert policy["passwordPolicyVersions"][0]["customStrengthOptions"] == {
+            "minPasswordLength": 12,
+            "maxPasswordLength": 4096,
+            "containsUppercaseCharacter": True,
+            "containsLowercaseCharacter": True,
+            "containsNumericCharacter": True,
+            "containsNonAlphanumericCharacter": True,
+        }
+        return httpx.Response(200, json={})
+
+    monkeypatch.setattr(deploy.httpx, "patch", patch)
+    runner.configure_auth()
 
 
 @pytest.fixture
@@ -276,7 +362,10 @@ def test_phone_env_refreshes_service_url_and_pinned_token(config, tmp_path, monk
     from dotenv import dotenv_values
 
     env_file = tmp_path / ".env"
-    env_file.write_text("MUSE_API_KEY=private-model-key\nUNRELATED=keep-me\n")
+    env_file.write_text(
+        "MUSE_API_KEY=private-model-key\nUNRELATED=keep-me\n"
+        "EXPO_PUBLIC_AUTH_EMULATOR_URL=http://127.0.0.1:9099\n"
+    )
     runner = deploy.Deployer(config)
     checks = []
     monkeypatch.setattr(runner, "verify_url", lambda url, token: checks.append((url, token)))
@@ -298,6 +387,7 @@ def test_phone_env_refreshes_service_url_and_pinned_token(config, tmp_path, monk
         assert values["EXPO_PUBLIC_DATA_SOURCE"] == "api"
         assert "EXPO_PUBLIC_DEMO_TOKEN" not in values
         assert "DEMO_BEARER_TOKEN" not in values
+        assert "EXPO_PUBLIC_AUTH_EMULATOR_URL" not in values
         assert values["EXPO_PUBLIC_FIREBASE_PROJECT_ID"] == config.project_id
         assert values["MUSE_API_KEY"] == "private-model-key"
         assert values["UNRELATED"] == "keep-me"

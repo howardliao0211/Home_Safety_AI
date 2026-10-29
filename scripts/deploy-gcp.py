@@ -157,16 +157,20 @@ class Deployer:
         payload = {
             "emailPrivacyConfig": {"enableImprovedEmailPrivacy": True},
             "passwordPolicyConfig": {
-                "enforcementState": "ENFORCE",
+                "passwordPolicyEnforcementState": "ENFORCE",
                 "forceUpgradeOnSignin": False,
-                "constraints": {
-                    "minLength": 12,
-                    "maxLength": 4096,
-                    "requireUppercase": True,
-                    "requireLowercase": True,
-                    "requireNumeric": True,
-                    "requireNonAlphanumeric": True,
-                },
+                "passwordPolicyVersions": [
+                    {
+                        "customStrengthOptions": {
+                            "minPasswordLength": 12,
+                            "maxPasswordLength": 4096,
+                            "containsUppercaseCharacter": True,
+                            "containsLowercaseCharacter": True,
+                            "containsNumericCharacter": True,
+                            "containsNonAlphanumericCharacter": True,
+                        },
+                    }
+                ],
             },
         }
         response = httpx.patch(
@@ -387,10 +391,54 @@ class Deployer:
 
     @staticmethod
     def smoke_token():
-        token = os.environ.get("HOME_SAFETY_SMOKE_ID_TOKEN", "")
+        settings = {**dotenv_values(ROOT / ".env"), **os.environ}
+        token = settings.get("HOME_SAFETY_SMOKE_ID_TOKEN", "")
         if not token:
+            email = settings.get("HOME_SAFETY_SMOKE_EMAIL")
+            password = settings.get("HOME_SAFETY_SMOKE_PASSWORD")
+            api_key = settings.get("EXPO_PUBLIC_FIREBASE_API_KEY")
+            if not all((email, password, api_key)):
+                raise DeploymentError(
+                    "Configure HOME_SAFETY_SMOKE_EMAIL, HOME_SAFETY_SMOKE_PASSWORD and "
+                    "the cloud EXPO_PUBLIC_FIREBASE_API_KEY in root .env for a verified test account. "
+                    "Alternatively set HOME_SAFETY_SMOKE_ID_TOKEN to a current Firebase ID token."
+                )
+            try:
+                response = httpx.post(
+                    "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword",
+                    params={"key": api_key},
+                    json={
+                        "email": email,
+                        "password": password,
+                        "returnSecureToken": True,
+                    },
+                    timeout=30,
+                )
+                if response.status_code != 200:
+                    raise DeploymentError(
+                        f"Test-user sign-in failed (HTTP {response.status_code}). Check the cloud Firebase key and test-account credentials."
+                    )
+                token = response.json()["idToken"]
+            except (httpx.HTTPError, ValueError, KeyError) as error:
+                raise DeploymentError("Could not sign in the deployment test user.") from error
+        try:
+            # Early diagnostics only. The backend still verifies the signature,
+            # issuer, project, revocation and account state for every protected call.
+            payload = token.split(".")[1]
+            claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+            expiry = float(claims["exp"])
+        except (ValueError, KeyError, IndexError, TypeError) as error:
             raise DeploymentError(
-                "Set HOME_SAFETY_SMOKE_ID_TOKEN to a current verified test-user Firebase ID token. It is used only in memory for smoke checks."
+                "The deployment test-user Firebase ID token is malformed."
+            ) from error
+        if expiry <= datetime.now(timezone.utc).timestamp() + 60:
+            raise DeploymentError(
+                "The test-user token has expired or is expiring. Configure test-account email/password "
+                "for automatic sign-in, or replace HOME_SAFETY_SMOKE_ID_TOKEN."
+            )
+        if claims.get("email_verified") is not True:
+            raise DeploymentError(
+                "Verify the deployment test account's email before starting deployment."
             )
         return token
 
@@ -412,8 +460,14 @@ class Deployer:
         from dotenv import unset_key
 
         if env_file.exists():
-            unset_key(str(env_file), "EXPO_PUBLIC_DEMO_TOKEN")
-            unset_key(str(env_file), "DEMO_BEARER_TOKEN")
+            values = dotenv_values(env_file)
+            for name in (
+                "EXPO_PUBLIC_DEMO_TOKEN",
+                "DEMO_BEARER_TOKEN",
+                "EXPO_PUBLIC_AUTH_EMULATOR_URL",
+            ):
+                if name in values:
+                    unset_key(str(env_file), name)
         env_file.touch(mode=0o600, exist_ok=True)
         env_file.chmod(0o600)
         for name, value in {
@@ -472,7 +526,10 @@ class Deployer:
             expect(client.get("/health"), 200)
             expect(client.get("/v1/assessments/latest"), 401)
             expect(
-                client.get("/v1/assessments/latest", headers={"Authorization": "Bearer invalid"}),
+                client.get(
+                    "/v1/assessments/latest",
+                    headers={"Authorization": "Bearer invalid"},
+                ),
                 401,
             )
             client.headers.update({"Authorization": f"Bearer {token}"})
@@ -531,8 +588,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--account", help="gcloud operator account override")
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("preflight", help="Check test-user credentials before provisioning")
     sub.add_parser(
-        "configure-auth", help="Enable account enumeration protection and password policy"
+        "configure-auth",
+        help="Enable account enumeration protection and password policy",
     )
     build = sub.add_parser("build", help="Build a local image without cloud access")
     build.add_argument("--tag", default="home-safety-backend:dev")
@@ -570,6 +629,10 @@ def main():
     args = parser.parse_args()
     os.umask(0o077)
     try:
+        if args.command == "preflight":
+            Deployer.smoke_token()
+            print("Deployment test-user credentials are ready.")
+            return 0
         if args.command == "build":
             subprocess.run(build_command(args.tag), check=True)
             print("Current local backend image built. Provision through scripts/terraform-gcp.py.")

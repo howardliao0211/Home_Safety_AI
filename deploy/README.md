@@ -45,11 +45,33 @@ use Cloud Run's generated `https://...run.app` service URL with managed HTTPS.
 
 ### Guided deployment script
 
+From the repository root, add the launcher to your shell's PATH once:
+
+```bash
+export PATH="$PWD/bin:$PATH"
+deploy start
+deploy stop
+```
+
+You can also use `./bin/deploy start` / `./bin/deploy stop`, or
+`python3 scripts/deploy.py start` / `python3 scripts/deploy.py stop`.
+The launcher works from any directory after PATH is configured. Keep this checkout
+and its private Terraform state when moving between machines.
+
 `scripts/deploy.py` automates provisioning, secrets, Muse releases, highlight
 recovery, verification and the phone environment steps below. It
 keeps the Terraform wrapper's saved-plan review and typed `apply` confirmations.
 Install the prerequisite tools and sign in with `gcloud auth login` first; put
 `MUSE_API_KEY` and `MUSE_MAIN_MODEL` in root `.env`.
+Configure a verified Firebase test account once, in the same cloud project as the
+deployment. In the private root `.env`, set `HOME_SAFETY_SMOKE_EMAIL`,
+`HOME_SAFETY_SMOKE_PASSWORD`, and the cloud `EXPO_PUBLIC_FIREBASE_API_KEY`.
+The script signs in through Firebase for fresh test tokens automatically; it
+never writes those tokens to phone settings. A current `HOME_SAFETY_SMOKE_ID_TOKEN`
+in `.env` or the environment is also supported and takes precedence.
+Start checks these credentials before building images or provisioning resources.
+First-time Firebase app registration and email verification are described in
+[authentication setup](../docs/authentication.md).
 
 ```bash
 python3 scripts/deploy.py start
@@ -93,18 +115,31 @@ python3 scripts/deploy.py stop
 `stop` defaults to destruction, including persistent assessments and photos; it
 does not pause resources. It displays a destroy plan and requires typing `destroy`
 before removing Cloud Run and applying the plan. It loads the same private variable
-file as `start`, and needs uv, Terraform and gcloud, but no Docker image or Muse
-credentials. Enabled project APIs, local configuration and private state backups remain. These retained cloud
-services may still incur charges. A later `start` provisions resources again and
+file as `start`, initializes Terraform if needed, and requires only Python, Terraform
+and gcloud. No uv, backend virtual environment, Docker image, model credentials or
+test-user token is needed. Partial deployments without release outputs and repeated
+stops are supported. Missing state is an error: restore a private backup rather than
+assuming there is nothing to delete.
+Identity Platform configuration and registered accounts remain: the Google
+provider removes this configuration from state without deleting it in GCP
+([provider implementation](https://github.com/hashicorp/terraform-provider-google/blob/v7.46.2/google/services/identityplatform/resource_identity_platform_config.go#L832)).
+Guided start imports this existing configuration after verifying test credentials,
+including after a stop. Manual first-time Terraform provisioning still creates it.
+Enabled project APIs, any historical demo-token secret, local configuration and
+private state backups remain. Retained secret versions can incur charges.
+A later `start` provisions resources again and
 automatically updates phone and worker configuration with the current service URL.
 Omitting `start`/`stop` retains the original `start` behavior.
 
-Cloud Tasks can block reuse of a deleted queue name for up to three days. If
-`start` reports that a queue with this name existed too recently, set
-`annotation_queue_name` to a fresh ID in the private
-`deploy/terraform/deploy.tfvars.json` and rerun `start`. Keep that ID on subsequent
-deployments; changing it replaces the queue. The default is
-`home-safety-annotations`.
+Cloud Tasks can block reuse of a deleted queue name for up to three days. The
+guided script automatically chooses a fresh queue ID for a new deployment or
+restart after stop, and keeps the ID of an existing Terraform-managed queue.
+Manual Terraform users can set `annotation_queue_name` to a fresh ID themselves.
+Firestore also temporarily reserves deleted database IDs. Guided start uses a
+fresh named database after teardown and keeps an existing database's ID on
+subsequent starts. The release automatically receives this ID; no client changes
+are needed. Manual Terraform provisioning defaults to `(default)` and can select
+`firestore_database_id` explicitly.
 
 Run from the repository root:
 
@@ -117,7 +152,7 @@ python3 scripts/terraform-gcp.py plan -out=phone.tfplan
 python3 scripts/terraform-gcp.py apply phone.tfplan
 ```
 
-Review the saved plan displayed by apply, then type `apply`. Init/plan/apply require
+Review the saved plan displayed by apply, then type `apply`. Plan/apply require
 local `home-safety-backend:dev` labelled with a hash of current Dockerfile, Docker
 ignore rules, locked dependencies and application sources. Missing/stale images
 stop with the exact build command. No remote image is needed before Terraform
@@ -243,8 +278,13 @@ python3 scripts/deploy.py stop
 ```
 
 The wrapper warns about assessment/photo deletion, creates/displays a destroy plan,
-requires typing `destroy`, invokes `deploy-gcp.py delete-service` first and applies
-the plan only after successful service removal. No current image is required.
+requires typing `destroy`, removes Cloud Run using the plan's project and region,
+and applies the plan only after successful service removal. It does not need
+release outputs. Before deleting a whole Firestore database, it backs up state and
+detaches that database's field configurations to avoid unnecessary index resets.
+It regenerates the plan after this state change and rejects newly introduced
+deletions. The database deletion removes the fields and data together.
+No current image is required.
 Firestore deletion protection is disabled and bucket destruction includes objects.
 Any historical unmanaged demo-token secret remains unused and can be retired separately.
 

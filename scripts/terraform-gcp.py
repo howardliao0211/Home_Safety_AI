@@ -36,7 +36,7 @@ def release_command(account, command):
     return [*args, command]
 
 
-def inspect_plan(terraform, plan_file, env):
+def read_plan(terraform, plan_file, env):
     result = subprocess.run(
         [*terraform, "show", "-json", plan_file],
         env=env,
@@ -44,7 +44,11 @@ def inspect_plan(terraform, plan_file, env):
         capture_output=True,
         text=True,
     )
-    changes = json.loads(result.stdout).get("resource_changes", [])
+    return json.loads(result.stdout)
+
+
+def inspect_plan(terraform, plan_file, env):
+    changes = read_plan(terraform, plan_file, env).get("resource_changes", [])
     for change in changes:
         if (
             change.get("type") == "google_secret_manager_secret"
@@ -56,6 +60,90 @@ def inspect_plan(terraform, plan_file, env):
                 "The plan would delete the persistent demo token. Run detach-demo-token and create a fresh plan first."
             )
     return changes
+
+
+def remove_cloud_run(plan, account, env):
+    """Teardown must work even when a partial apply never wrote release outputs."""
+    variables = plan["variables"]
+    flags = [
+        f"--project={variables['project_id']['value']}",
+        f"--region={variables['region']['value']}",
+        "--quiet",
+    ]
+    if account:
+        flags.append(f"--account={account}")
+    # A successful empty list means absent; permission/network failures must stop teardown.
+    services = subprocess.run(
+        [
+            "gcloud",
+            "run",
+            "services",
+            "list",
+            *flags,
+            "--filter=metadata.name=home-safety-demo",
+            "--format=value(metadata.name)",
+        ],
+        env=env,
+        check=True,
+        stdout=subprocess.PIPE,
+        text=True,
+    ).stdout.strip()
+    if services:
+        if services != "home-safety-demo":
+            raise RuntimeError("Unexpected Cloud Run service in teardown lookup.")
+        subprocess.run(
+            ["gcloud", "run", "services", "delete", "home-safety-demo", *flags],
+            env=env,
+            check=True,
+        )
+
+
+def teardown(terraform, extra, account, env):
+    print(
+        "Destroy removes persistent assessment data and photo objects. The external demo-token secret remains.",
+        flush=True,
+    )
+    plan_command = [*terraform, "plan", "-destroy", *extra, "-out=destroy.tfplan"]
+    subprocess.run(plan_command, env=env, check=True)
+    changes = inspect_plan(terraform, "destroy.tfplan", env)
+    plan = read_plan(terraform, "destroy.tfplan", env)
+    subprocess.run([*terraform, "show", "destroy.tfplan"], env=env, check=True)
+    if input("Type destroy to remove Cloud Run and apply this destroy plan: ") != "destroy":
+        raise RuntimeError("Destroy cancelled.")
+    backup_state()
+    try:
+        remove_cloud_run(plan, account, env)
+        databases = {
+            c["change"]["before"]["id"]
+            for c in changes
+            if c.get("type") == "google_firestore_database" and c["change"]["actions"] == ["delete"]
+        }
+        fields = [
+            c["address"]
+            for c in changes
+            if c.get("type") == "google_firestore_field"
+            and c["change"]["actions"] == ["delete"]
+            and any(c["change"]["before"]["id"].startswith(db + "/") for db in databases)
+        ]
+        if fields:
+            # Resetting field indexes can hang for hours. Their entire database is
+            # being deleted, so no field reset is needed. Keep a recoverable backup.
+            subprocess.run([*terraform, "state", "rm", *fields], env=env, check=True)
+            # State serial changed: regenerate the plan, never apply the stale one.
+            subprocess.run(plan_command, env=env, check=True)
+            updated = inspect_plan(terraform, "destroy.tfplan", env)
+            reviewed = {c["address"] for c in changes if c["change"]["actions"] == ["delete"]}
+            if any(
+                c["change"]["actions"] != ["no-op"]
+                and (c["change"]["actions"] != ["delete"] or c["address"] not in reviewed)
+                for c in updated
+            ):
+                raise RuntimeError(
+                    "Teardown plan changed beyond reviewed deletions; rerun destroy to review it."
+                )
+        return subprocess.run([*terraform, "apply", "destroy.tfplan"], env=env).returncode
+    finally:
+        backup_state()
 
 
 def report_release(account):
@@ -91,9 +179,7 @@ def report_release(account):
     if service.returncode == 0:
         data = json.loads(service.stdout)
         # Describe the actually serving revision, rather than the latest failed candidate.
-        traffic = [
-            t for t in data.get("status", {}).get("traffic", []) if t.get("percent", 0)
-        ]
+        traffic = [t for t in data.get("status", {}).get("traffic", []) if t.get("percent", 0)]
         if len(traffic) == 1 and traffic[0].get("percent") == 100:
             revision_command = [
                 "gcloud",
@@ -103,13 +189,9 @@ def report_release(account):
                 traffic[0]["revisionName"],
                 *command[5:],
             ]
-            revision = subprocess.run(
-                revision_command, capture_output=True, text=True, check=False
-            )
+            revision = subprocess.run(revision_command, capture_output=True, text=True, check=False)
             if revision.returncode == 0:
-                environment = json.loads(revision.stdout)["spec"]["containers"][0].get(
-                    "env", []
-                )
+                environment = json.loads(revision.stdout)["spec"]["containers"][0].get("env", [])
                 values = {item["name"]: item.get("value") for item in environment}
                 needed = (
                     values.get("BACKEND_SOURCE_HASH") != source_hash()
@@ -117,24 +199,17 @@ def report_release(account):
                     or (
                         bool(config.get("annotation_worker_url"))
                         and (
-                            values.get("ANNOTATION_WORKER_URL")
-                            != config["annotation_worker_url"]
+                            values.get("ANNOTATION_WORKER_URL") != config["annotation_worker_url"]
                             or values.get("MUSE_SEGMENTATION_MODEL") != "sam-3.1"
                         )
                     )
                 )
     if needed:
-        print(
-            "A Muse image release is needed. Run explicitly (select your Muse model):"
-        )
+        print("A Muse image release is needed. Run explicitly (select your Muse model):")
         print(
             shlex.join(release_command(account, "release"))
             + " --provider muse --model YOUR_MUSE_MAIN_MODEL"
-            + (
-                " --segmentation-model sam-3.1"
-                if config.get("annotation_worker_url")
-                else ""
-            )
+            + (" --segmentation-model sam-3.1" if config.get("annotation_worker_url") else "")
         )
     else:
         print("The serving Muse revision matches current backend build inputs.")
@@ -161,15 +236,18 @@ def main() -> int:
     os.umask(0o077)
     command = args.command
     try:
-        if command in {"init", "plan", "apply"}:
+        if command in {"plan", "apply"}:
             require_current_image()
+        if command == "destroy" and not (DIRECTORY / "terraform.tfstate").is_file():
+            raise RuntimeError(
+                "Local Terraform state is missing. Restore its private backup before teardown."
+            )
         if command == "apply" and (len(extra) != 1 or extra[0].startswith("-")):
             raise RuntimeError(
                 "Apply requires one reviewed saved plan: plan -out=phone.tfplan, then apply phone.tfplan."
             )
         if command == "destroy" and any(
-            not arg.startswith("-var-file=") or not arg.removeprefix("-var-file=")
-            for arg in extra
+            not arg.startswith("-var-file=") or not arg.removeprefix("-var-file=") for arg in extra
         ):
             raise RuntimeError(
                 "Destroy accepts only -var-file=PATH; it creates and displays a destroy plan for confirmation."
@@ -189,9 +267,7 @@ def main() -> int:
             token_command, check=True, text=True, stdout=subprocess.PIPE
         ).stdout.strip()
         if not token:
-            raise RuntimeError(
-                "gcloud returned an empty token. Sign in using gcloud auth login."
-            )
+            raise RuntimeError("gcloud returned an empty token. Sign in using gcloud auth login.")
         env = os.environ.copy()
         for name in (
             "GOOGLE_CREDENTIALS",
@@ -221,31 +297,7 @@ def main() -> int:
                 env=env,
             ).returncode
         if command == "destroy":
-            print(
-                "Destroy removes persistent assessment data and photo objects. The external demo-token secret remains.",
-                flush=True,
-            )
-            subprocess.run(
-                [*terraform, "plan", "-destroy", *extra, "-out=destroy.tfplan"],
-                env=env,
-                check=True,
-            )
-            inspect_plan(terraform, "destroy.tfplan", env)
-            subprocess.run([*terraform, "show", "destroy.tfplan"], env=env, check=True)
-            if (
-                input("Type destroy to remove Cloud Run and apply this destroy plan: ")
-                != "destroy"
-            ):
-                raise RuntimeError("Destroy cancelled.")
-            subprocess.run(
-                release_command(args.account, "delete-service"), env=env, check=True
-            )
-            try:
-                return subprocess.run(
-                    [*terraform, "apply", "destroy.tfplan"], env=env
-                ).returncode
-            finally:
-                backup_state()
+            return teardown(terraform, extra, args.account, env)
         if command == "apply":
             # An externally created destroy plan must not bypass ordered teardown.
             changes = inspect_plan(terraform, extra[0], env)
@@ -272,7 +324,7 @@ def main() -> int:
         finally:
             if command == "apply":
                 backup_state()
-        if result.returncode == 0 and command in {"init", "plan", "apply"}:
+        if result.returncode == 0 and command in {"plan", "apply"}:
             report_release(args.account)
         return result.returncode
     except (

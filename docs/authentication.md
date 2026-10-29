@@ -133,8 +133,14 @@ configuration. For first deployment, resolve the canonical Cloud Run origin from
 the intended service name/project number/region before provisioning the schedule.
 
 `release`, `verify`, `rollback`, and `phone-env` need
-`HOME_SAFETY_SMOKE_ID_TOKEN` in the operator process: a current verified test-user
-Firebase ID token for this project, never a service OIDC token. It is used in
+deployment test credentials in the private root `.env` or operator environment.
+Set `HOME_SAFETY_SMOKE_EMAIL`, `HOME_SAFETY_SMOKE_PASSWORD`, and the cloud
+`EXPO_PUBLIC_FIREBASE_API_KEY` for automatic Firebase sign-in on each invocation.
+Use an existing test account with verified email in the deployment's project.
+Alternatively, `HOME_SAFETY_SMOKE_ID_TOKEN` takes precedence: a current verified
+test-user Firebase ID token for this project, never a service OIDC token.
+`deploy start` checks token expiry and verified-email claims before provisioning;
+the backend still performs full verification for every protected request. It is used in
 memory for actual protected photo/assessment CRUD and removed fixture checks;
 it is never written into phone settings. Rollback rejects legacy demo-token
 revisions. Model keys remain numbered Secret Manager versions. Remove emulator

@@ -10,6 +10,22 @@ variable "region" {
   default     = "us-central1"
 }
 
+variable "adopt_existing_identity_config" {
+  description = "Guided deployments use an existing verified test account and import its persistent Identity Platform config."
+  type        = bool
+  default     = false
+}
+
+variable "firestore_database_id" {
+  description = "Firestore database ID. Guided start chooses a fresh ID after teardown to avoid GCP's name-reuse delay."
+  type        = string
+  default     = "(default)"
+  validation {
+    condition     = var.firestore_database_id == "(default)" || can(regex("^[a-z][a-z0-9-]{2,61}[a-z0-9]$", var.firestore_database_id))
+    error_message = "Use (default) or a 4-63 character lowercase database ID starting with a letter and ending with a letter or digit."
+  }
+}
+
 variable "annotation_worker_url" {
   description = "HTTPS API origin; set to the current Cloud Run service URL before enabling durable highlights."
   type        = string

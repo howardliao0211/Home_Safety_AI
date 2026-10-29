@@ -59,7 +59,7 @@ resource "google_storage_bucket_iam_member" "backend_photos" {
 
 resource "google_firestore_database" "assessments" {
   project                     = var.project_id
-  name                        = "(default)"
+  name                        = var.firestore_database_id
   location_id                 = var.region
   type                        = "FIRESTORE_NATIVE"
   database_edition            = "STANDARD"
@@ -182,6 +182,15 @@ resource "google_firestore_field" "annotation_dispatch" {
   }
 }
 
+# Identity Platform config survives destroy in GCP. Guided start verifies an
+# existing test account before provisioning, so adopt its config on every fresh
+# state. Manual first-time provisioning keeps the default (create instead).
+import {
+  for_each = var.adopt_existing_identity_config ? toset([var.project_id]) : toset([])
+  to       = google_identity_platform_config.accounts
+  id       = "projects/${each.value}/config"
+}
+
 resource "google_identity_platform_config" "accounts" {
   project = var.project_id
   client {
@@ -193,6 +202,7 @@ resource "google_identity_platform_config" "accounts" {
   sign_in {
     allow_duplicate_emails = false
     anonymous { enabled = false }
+    phone_number { enabled = false }
     email {
       enabled           = true
       password_required = true

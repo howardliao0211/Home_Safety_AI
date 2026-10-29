@@ -80,7 +80,12 @@ class DeploymentTests(unittest.TestCase):
             state.write_text(
                 json.dumps(
                     {
-                        "resources": [{"type": "google_cloud_tasks_queue"}],
+                        "resources": [
+                            {
+                                "type": "google_cloud_tasks_queue",
+                                "instances": [{"attributes": {"name": "existing-queue"}}],
+                            }
+                        ],
                         "outputs": {"deployment_config": {"value": {}}},
                     }
                 )
@@ -104,14 +109,21 @@ class DeploymentTests(unittest.TestCase):
                     save.call_args_list[0].kwargs,
                     {
                         "annotation_worker_url": "https://service.run.app",
+                        "adopt_existing_identity_config": True,
                     },
                 )
                 release.assert_called_once_with(highlights=True)
+                self.assertEqual(
+                    save.call_args_list[1].kwargs, {"annotation_queue_name": "existing-queue"}
+                )
                 self.assertEqual(run.call_args.args[0][-1], "phone-env")
 
     def test_bootstrap_recovers_state_without_deployment_config_output(self):
         for saved_url in ("", "https://service.run.app"):
-            with self.subTest(saved_url=saved_url), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(saved_url=saved_url),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 root = Path(directory)
                 state = root / "deploy/terraform/terraform.tfstate"
                 state.parent.mkdir(parents=True)
@@ -147,6 +159,7 @@ class DeploymentTests(unittest.TestCase):
                     save.call_args_list[0].kwargs,
                     {
                         "annotation_worker_url": saved_url,
+                        "adopt_existing_identity_config": True,
                     },
                 )
                 self.assertEqual(apply.call_count, 1 if saved_url else 2)
@@ -191,10 +204,14 @@ class DeploymentTests(unittest.TestCase):
                 patch.object(deploy.shutil, "which", return_value="installed"),
                 patch.object(deploy, "run", side_effect=run),
                 patch.object(
-                    deploy.Deployment, "bootstrap", side_effect=lambda: events.append("bootstrap")
+                    deploy.Deployment,
+                    "bootstrap",
+                    side_effect=lambda: events.append("bootstrap"),
                 ),
                 patch.object(
-                    deploy.Deployment, "finish", side_effect=lambda: events.append("finish")
+                    deploy.Deployment,
+                    "finish",
+                    side_effect=lambda: events.append("finish"),
                 ),
             ):
                 self.assertEqual(deploy.main(), 0)
@@ -207,6 +224,7 @@ class DeploymentTests(unittest.TestCase):
         with (
             patch.object(deploy, "run") as run,
             patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "is_file", return_value=True),
         ):
             self.deployment.stop()
         self.assertEqual(
@@ -217,6 +235,7 @@ class DeploymentTests(unittest.TestCase):
                 f"-var-file={deploy.VARIABLES}",
             ],
         )
+        self.assertEqual(run.call_args_list[0].args[0][-1], "init")
 
     def test_stop_needs_no_docker_model_or_image_build(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -236,8 +255,109 @@ class DeploymentTests(unittest.TestCase):
                 self.assertEqual(deploy.main(), 0)
             stop.assert_called_once()
             self.assertNotIn("docker", prerequisites)
-            self.assertEqual(len(commands), 1)
-            self.assertEqual(commands[0][:2], ["uv", "sync"])
+            self.assertNotIn("uv", prerequisites)
+            self.assertEqual(commands, [])
+
+    def test_bootstrap_chooses_new_queue_after_destroy(self):
+        names = []
+        databases = []
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "deploy/terraform/terraform.tfstate"
+            state.parent.mkdir(parents=True)
+            state.write_text(json.dumps({"resources": []}))
+            variables = state.parent / "deploy.tfvars.json"
+            variables.write_text(
+                json.dumps({"annotation_queue_name": "home-safety-annotations-old"})
+            )
+            with (
+                patch.object(deploy, "ROOT", root),
+                patch.object(deploy, "VARIABLES", variables),
+                patch.object(
+                    self.deployment,
+                    "output",
+                    return_value={
+                        "project_id": "test",
+                        "service_name": "test",
+                        "region": "us-central1",
+                    },
+                ),
+                patch.object(self.deployment, "apply"),
+                patch.object(self.deployment, "release"),
+                patch.object(deploy, "run", return_value="1234"),
+            ):
+                for _ in range(2):
+                    self.deployment.bootstrap()
+                    names.append(json.loads(variables.read_text())["annotation_queue_name"])
+                    databases.append(json.loads(variables.read_text())["firestore_database_id"])
+        self.assertNotEqual(names[0], "home-safety-annotations-old")
+        self.assertNotEqual(names[0], names[1])
+        self.assertNotEqual(databases[0], databases[1])
+
+    def test_bootstrap_preserves_existing_database(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "deploy/terraform/terraform.tfstate"
+            state.parent.mkdir(parents=True)
+            state.write_text(
+                json.dumps(
+                    {
+                        "resources": [
+                            {
+                                "type": "google_firestore_database",
+                                "instances": [
+                                    {
+                                        "attributes": {
+                                            "name": "existing-db",
+                                            "id": "projects/p/databases/existing-db",
+                                        }
+                                    }
+                                ],
+                            }
+                        ],
+                        "outputs": {"deployment_config": {}},
+                    }
+                )
+            )
+            with (
+                patch.object(deploy, "ROOT", root),
+                patch.object(
+                    self.deployment,
+                    "output",
+                    return_value={"annotation_worker_url": "https://service.run.app"},
+                ),
+                patch.object(self.deployment, "save_variables") as save,
+                patch.object(self.deployment, "apply"),
+                patch.object(self.deployment, "release"),
+                patch.object(deploy, "run"),
+            ):
+                self.deployment.bootstrap()
+            self.assertIn(
+                {"firestore_database_id": "existing-db"}, [c.kwargs for c in save.call_args_list]
+            )
+
+    def test_start_preflights_auth_before_build_or_provisioning(self):
+        with tempfile.TemporaryDirectory() as directory:
+            commands = []
+
+            def run(command, **kwargs):
+                commands.append(command)
+                if kwargs.get("capture"):
+                    return json.dumps({"model": "muse-test", "has_key": True})
+                if command[-1] == "preflight":
+                    raise subprocess.CalledProcessError(1, command)
+
+            with (
+                patch.object(deploy, "ROOT", Path(directory)),
+                patch("sys.argv", ["deploy.py", "start"]),
+                patch.object(deploy.shutil, "which", return_value="installed"),
+                patch.object(deploy, "run", side_effect=run),
+                patch.object(deploy.Deployment, "bootstrap") as bootstrap,
+            ):
+                self.assertEqual(deploy.main(), 1)
+                bootstrap.assert_not_called()
+            self.assertTrue(any(c[-1] == "preflight" for c in commands))
+            self.assertFalse(any(c[-1] in {"build", "init", "validate"} for c in commands))
 
     def test_bootstrap_can_restart_after_destroy_emptied_state(self):
         with tempfile.TemporaryDirectory() as directory:

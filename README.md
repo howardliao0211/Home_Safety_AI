@@ -11,6 +11,18 @@ examples and works without a backend or credentials.
 
 ## Development environment
 
+For GCP deployment, follow the one-time credential setup in
+[the deployment guide](deploy/README.md), then run from the repository root:
+
+```bash
+export PATH="$PWD/bin:$PATH"
+deploy start
+deploy stop
+```
+
+Start provisions and releases the backend. Stop deletes its infrastructure and
+stored assessments/photos after a typed confirmation.
+
 ### Prerequisites
 
 - Git and a local checkout of this repository.

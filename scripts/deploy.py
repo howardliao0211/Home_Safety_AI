@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = ROOT / "backend/.venv/bin/python"
@@ -50,13 +51,25 @@ class Deployment:
         return json.loads(run([*self.terraform, "output", "-json", name], capture=True))
 
     def stop(self):
+        if not (ROOT / "deploy/terraform/terraform.tfstate").is_file():
+            raise RuntimeError(
+                "Local Terraform state is missing. Restore its private backup before stop."
+            )
+        run([*self.terraform, "init"])
         command = [*self.terraform, "destroy"]
         if VARIABLES.exists():
             command.append(f"-var-file={VARIABLES}")
         run(command)
 
     def release(self, *, highlights=False):
-        command = [*self.backend, "release", "--provider", "muse", "--model", self.args.model]
+        command = [
+            *self.backend,
+            "release",
+            "--provider",
+            "muse",
+            "--model",
+            self.args.model,
+        ]
         if highlights:
             command.extend(["--segmentation-model", "sam-3.1"])
         run(command)
@@ -64,6 +77,7 @@ class Deployment:
     def bootstrap(self):
         # Preserve recovery on repeated deployments; finish refreshes its URL.
         worker_url = ""
+        saved_state = {}
         state = ROOT / "deploy/terraform/terraform.tfstate"
         if state.exists():
             saved_state = json.loads(state.read_text())
@@ -75,7 +89,24 @@ class Deployment:
                     # Older or partially applied state may not have this output yet.
                     # Keep the saved target until apply can populate the output.
                     worker_url = json.loads(VARIABLES.read_text()).get("annotation_worker_url", "")
-        self.save_variables(annotation_worker_url=worker_url)
+        self.save_variables(annotation_worker_url=worker_url, adopt_existing_identity_config=True)
+        # GCP reserves deleted queue/database IDs. Allocate fresh IDs only when
+        # the resource is absent from state; retain existing resources and data.
+        for resource_type, variable, prefix in (
+            ("google_cloud_tasks_queue", "annotation_queue_name", "home-safety-annotations"),
+            ("google_firestore_database", "firestore_database_id", "home-safety-demo"),
+        ):
+            existing = [
+                r
+                for r in saved_state.get("resources", [])
+                if r.get("type") == resource_type and r.get("instances")
+            ]
+            if existing:
+                attributes = existing[0]["instances"][0]["attributes"]
+                name = attributes.get("name") or attributes["id"].rsplit("/", 1)[-1]
+            else:
+                name = f"{prefix}-{uuid4().hex[:12]}"
+            self.save_variables(**{variable: name})
         self.apply()
         if not worker_url:
             config = self.output("deployment_config")
@@ -115,7 +146,13 @@ class Deployment:
         run([*self.backend, "phone-env"])
         if self.args.start_expo:
             # npm's Expo launcher reads only root EXPO_PUBLIC_ entries.
-            run(["bash", "-c", "source scripts/frontend-env.sh && npm --prefix mobile ci"])
+            run(
+                [
+                    "bash",
+                    "-c",
+                    "source scripts/frontend-env.sh && npm --prefix mobile ci",
+                ]
+            )
             run(
                 [
                     "bash",
@@ -157,9 +194,9 @@ def main():
     os.umask(0o077)
     lock = None
     try:
-        prerequisites = ["uv", "terraform", "gcloud"]
+        prerequisites = ["terraform", "gcloud"]
         if args.command == "start":
-            prerequisites.append("docker")
+            prerequisites.extend(["uv", "docker"])
         for executable in prerequisites:
             if not shutil.which(executable):
                 raise RuntimeError(f"Install {executable} before running deployment.")
@@ -170,11 +207,11 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise RuntimeError("Another deploy.py process is running.") from error
-        run(["uv", "sync", "--project", "backend", "--extra", "dev", "--locked"])
         deployment = Deployment(args)
         if args.command == "stop":
             deployment.stop()
             return 0
+        run(["uv", "sync", "--project", "backend", "--extra", "dev", "--locked"])
         # Resolve dotenv using the synced backend environment; never print credentials.
         settings = json.loads(
             run(
@@ -197,6 +234,7 @@ def main():
                 )
         if args.stage in {"all", "bootstrap"} and not settings["has_key"]:
             raise RuntimeError("Set MUSE_API_KEY in root .env or your environment.")
+        run([*deployment.backend, "preflight"])
         run([*deployment.backend, "build"])
         run([*deployment.terraform, "init"])
         run([*deployment.terraform, "validate"])
