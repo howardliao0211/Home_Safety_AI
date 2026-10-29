@@ -162,12 +162,12 @@ class Deployer:
                 "passwordPolicyVersions": [
                     {
                         "customStrengthOptions": {
-                            "minPasswordLength": 12,
-                            "maxPasswordLength": 4096,
-                            "containsUppercaseCharacter": True,
+                            "minPasswordLength": 9,
+                            "maxPasswordLength": 32,
+                            "containsUppercaseCharacter": False,
                             "containsLowercaseCharacter": True,
                             "containsNumericCharacter": True,
-                            "containsNonAlphanumericCharacter": True,
+                            "containsNonAlphanumericCharacter": False,
                         },
                     }
                 ],

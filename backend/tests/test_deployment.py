@@ -106,12 +106,12 @@ def test_auth_configuration_uses_identity_platform_rest_password_policy_schema(c
         assert policy["forceUpgradeOnSignin"] is False
         assert len(policy["passwordPolicyVersions"]) == 1
         assert policy["passwordPolicyVersions"][0]["customStrengthOptions"] == {
-            "minPasswordLength": 12,
+            "minPasswordLength": 9,
             "maxPasswordLength": 4096,
-            "containsUppercaseCharacter": True,
+            "containsUppercaseCharacter": False,
             "containsLowercaseCharacter": True,
             "containsNumericCharacter": True,
-            "containsNonAlphanumericCharacter": True,
+            "containsNonAlphanumericCharacter": False,
         }
         return httpx.Response(200, json={})
 

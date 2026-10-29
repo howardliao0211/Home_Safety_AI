@@ -120,7 +120,7 @@ credentials remain ADC/service-account credentials on the backend.
 The installed Google Terraform provider does not expose password-policy or email
 privacy fields. After provisioning, run `scripts/deploy-gcp.py configure-auth`
 with the normal backend Python environment to enable enumeration protection and
-a required 12-character uppercase/lowercase/number/symbol password policy through
+a required 9-character lowercase/number password policy through
 the official Identity Toolkit configuration API. Verify the settings in the console.
 Keep provider-managed browser verification/reset action pages; configure authorized
 domains and email sender/templates in Firebase Authentication before release.

@@ -400,8 +400,8 @@ export function AuthScreen({
                 />
                 {mode === "signup" && (
                   <Text style={text}>
-                    Use a strong password with at least 12 characters, including
-                    uppercase, lowercase, a number and a symbol.
+                    Use at least 9 characters, including a lowercase letter and
+                    a number.
                   </Text>
                 )}
               </View>

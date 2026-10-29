@@ -234,14 +234,12 @@ function useAccountState() {
       // documented local policy explicit; production always queries the provider.
       if (
         emulatorUrl &&
-        (password.length < 12 ||
+        (password.length < 9 ||
           !/[a-z]/.test(password) ||
-          !/[A-Z]/.test(password) ||
-          !/[0-9]/.test(password) ||
-          !/[^A-Za-z0-9]/.test(password))
+          !/[0-9]/.test(password))
       ) {
         throw new ApiError(
-          "Use at least 12 characters with uppercase, lowercase, a number and a symbol.",
+          "Use at least 9 characters with a lowercase letter and a number.",
           422,
           "password_policy",
         );

@@ -174,6 +174,7 @@ test("registration, verification refresh, sign-out isolation and password recove
   request,
 }) => {
   const email = `${crypto.randomUUID()}@example.test`;
+  const password = "abcdefg12";
   const endpoint =
     "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:";
   await page.goto("/");
@@ -183,7 +184,7 @@ test("registration, verification refresh, sign-out isolation and password recove
   await page.getByRole("textbox", { name: "Email", exact: true }).fill(email);
   await page
     .getByLabel("Password", { exact: true })
-    .fill("Strong-password-123");
+    .fill(password);
   await page
     .getByRole("button", { name: "Show password", exact: true })
     .click();
@@ -260,7 +261,7 @@ test("registration, verification refresh, sign-out isolation and password recove
       await request.post(endpoint + "signInWithPassword?key=local", {
         data: {
           email,
-          password: "Strong-password-123",
+          password,
           returnSecureToken: true,
         },
       })
