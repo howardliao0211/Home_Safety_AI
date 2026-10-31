@@ -53,6 +53,35 @@ test("portrait photo is shown whole with progressive severity highlights for ope
     .click();
   await expect(masks(page)).toHaveCount(3);
 
+  await page
+    .getByRole("button", { name: "Hide highlights", exact: true })
+    .click();
+  await expect(masks(page)).toHaveCount(0);
+  await expect(photo).toBeVisible();
+  await expect(page.getByText(/Highlights hidden/)).toBeVisible();
+  await expect(
+    page.getByRole("checkbox", {
+      name: "Mark resolved: Check the tall cabinet",
+    }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Show highlights", exact: true })
+    .click();
+  await expect(masks(page)).toHaveCount(3);
+  await page
+    .getByRole("button", { name: "Hide highlights", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "View room concept", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Back to checklist", exact: true })
+    .click();
+  await expect(masks(page)).toHaveCount(3);
+  await expect(
+    page.getByRole("button", { name: "Hide highlights", exact: true }),
+  ).toBeVisible();
+
   // Alignment survives a resize.
   await page.setViewportSize({ width: 320, height: 800 });
   const narrow = (await photo.boundingBox())!;

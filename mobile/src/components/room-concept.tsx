@@ -3,11 +3,12 @@ import {
   AccessibilityInfo,
   AppState,
   Platform,
-  ScrollView,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { Image } from "expo-image";
 import { router, useFocusEffect } from "expo-router";
+import { EvidencePhoto } from "./evidence-photo";
 import { apiEnabled } from "@/api/config";
 import { usePreview } from "@/hooks/preview-context";
 import { conceptDisclaimer, conceptStatus } from "@/domain/room-concept";
@@ -96,8 +97,9 @@ export function RoomConceptViewer({ assessment }: { assessment: Assessment }) {
   const [retrying, setRetrying] = useState(false);
   const [uri, setUri] = useState<string>();
   const [imageAttempt, setImageAttempt] = useState(0);
-  const [width, setWidth] = useState(300);
-  const [zoom, setZoom] = useState(1);
+  const [width, setWidth] = useState(0);
+  const { fontScale } = useWindowDimensions();
+  const sideBySide = width / fontScale >= 600;
   const status = concept
     ? conceptStatus(concept)
     : "No room concept for this assessment.";
@@ -143,101 +145,99 @@ export function RoomConceptViewer({ assessment }: { assessment: Assessment }) {
           Simulated concept: this sample image is not an edit of your room.
         </Copy>
       )}
-      <Copy accessibilityLiveRegion="polite">{status}</Copy>
-      {!!observationError && (
-        <Notice title="Connection unavailable">
-          <Copy>{observationError}</Copy>
-        </Notice>
-      )}
-      {concept && ["queued", "running"].includes(concept.state) && (
-        <Copy>
-          You can return to your checklist. Generation continues in the
-          background.
-        </Copy>
-      )}
-      {concept?.state === "ready" && (
+      <View
+        onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
+        style={{
+          flexDirection: sideBySide ? "row" : "column",
+          alignItems: "flex-start",
+          gap: 24,
+        }}
+      >
         <View
-          style={{ gap: 12 }}
-          onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+          style={{
+            gap: 12,
+            width: sideBySide ? undefined : "100%",
+            flex: sideBySide ? 1 : undefined,
+            minWidth: 0,
+          }}
         >
-          {error ? (
-            <Notice title="Image unavailable">
-              <Copy>{error}</Copy>
-              <Button
-                label="Retry loading image"
-                variant="secondary"
-                onPress={() => setImageAttempt((n) => n + 1)}
-              />
+          <Copy kind="heading" accessibilityRole="header">
+            Original room
+          </Copy>
+          <EvidencePhoto key={assessment.photo.id} photo={assessment.photo} />
+        </View>
+        <View
+          style={{
+            gap: 12,
+            width: sideBySide ? undefined : "100%",
+            flex: sideBySide ? 1 : undefined,
+            minWidth: 0,
+          }}
+        >
+          <Copy kind="heading" accessibilityRole="header">
+            Generated room concept
+          </Copy>
+          <Copy accessibilityLiveRegion="polite">{status}</Copy>
+          {!!observationError && (
+            <Notice title="Connection unavailable">
+              <Copy>{observationError}</Copy>
             </Notice>
-          ) : source ? (
+          )}
+          {concept && ["queued", "running"].includes(concept.state) && (
+            <Copy>
+              You can return to your checklist. Generation continues in the
+              background.
+            </Copy>
+          )}
+          {concept?.state === "ready" &&
+            (error ? (
+              <Notice title="Image unavailable">
+                <Copy>{error}</Copy>
+                <Button
+                  label="Retry loading image"
+                  variant="secondary"
+                  onPress={() => setImageAttempt((n) => n + 1)}
+                />
+              </Notice>
+            ) : source ? (
+              <Image
+                source={source}
+                cachePolicy="none"
+                contentFit="contain"
+                accessibilityLabel="AI-generated room concept illustrating suggested changes, not evidence of safety"
+                style={{ width: "100%", aspectRatio: ratio }}
+                onError={() =>
+                  setError(
+                    "Could not display the saved image. Your assessment is unchanged.",
+                  )
+                }
+              />
+            ) : (
+              <Copy>Loading saved room concept…</Copy>
+            ))}
+          {concept?.state === "failed" && concept.can_retry && (
             <>
-              <ScrollView
-                horizontal
-                contentContainerStyle={{ width: width * zoom }}
-              >
-                <Image
-                  source={source}
-                  cachePolicy="none"
-                  contentFit="contain"
-                  accessibilityLabel="AI-generated room concept illustrating suggested changes, not evidence of safety"
-                  style={{
-                    width: width * zoom,
-                    height: (width * zoom) / ratio,
-                  }}
-                  onError={() =>
-                    setError(
-                      "Could not display the saved image. Your assessment is unchanged.",
+              {!!error && <Copy accessibilityLiveRegion="polite">{error}</Copy>}
+              <Button
+                label="Retry room concept"
+                disabled={retrying}
+                loading={retrying}
+                onPress={() => {
+                  setRetrying(true);
+                  setError(undefined);
+                  void retryRoomConcept(assessment.id)
+                    .catch(() =>
+                      setError(
+                        "Could not retry. Check your connection and try again.",
+                      ),
                     )
-                  }
-                />
-              </ScrollView>
-              <View style={{ gap: 8, flexDirection: "row", flexWrap: "wrap" }}>
-                <Button
-                  label="Zoom in"
-                  variant="secondary"
-                  disabled={zoom >= 2}
-                  onPress={() => setZoom((n) => Math.min(2, n + 0.5))}
-                />
-                <Button
-                  label="Fit image"
-                  variant="secondary"
-                  disabled={zoom === 1}
-                  onPress={() => setZoom(1)}
-                />
-              </View>
-              {zoom > 1 && (
-                <Copy kind="small">
-                  Scroll to inspect the image, or choose Fit image to see the
-                  whole room.
-                </Copy>
-              )}
+                    .finally(() => setRetrying(false));
+                }}
+              />
             </>
-          ) : (
-            <Copy>Loading saved room concept…</Copy>
           )}
         </View>
-      )}
-      {concept?.state === "failed" && concept.can_retry && (
-        <>
-          {!!error && <Copy accessibilityLiveRegion="polite">{error}</Copy>}
-          <Button
-            label="Retry room concept"
-            disabled={retrying}
-            loading={retrying}
-            onPress={() => {
-              setRetrying(true);
-              setError(undefined);
-              void retryRoomConcept(assessment.id)
-                .catch(() =>
-                  setError(
-                    "Could not retry. Check your connection and try again.",
-                  ),
-                )
-                .finally(() => setRetrying(false));
-            }}
-          />
-        </>
-      )}
+      </View>
       <Button
         label="Back to checklist"
         variant="secondary"

@@ -5,7 +5,7 @@ import { apiEnabled } from "@/api/config";
 import { usePreview } from "@/hooks/preview-context";
 import { overviewHighlights } from "@/domain/highlights";
 import type { Assessment, Finding } from "@/domain/model";
-import { Copy } from "@/components/ui";
+import { Button, Copy } from "@/components/ui";
 import { EvidencePhoto } from "@/components/evidence-photo";
 import { colors, severityColors } from "@/components/theme";
 
@@ -58,6 +58,7 @@ export function ChecklistPhoto({ assessment }: { assessment: Assessment }) {
   const requested = useRef(new Set<string>());
   const mounted = useRef(true);
   const [retryRound, setRetryRound] = useState(0);
+  const [hidden, setHidden] = useState(false);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -118,6 +119,7 @@ export function ChecklistPhoto({ assessment }: { assessment: Assessment }) {
   // Reopen/foreground return always refetches saved highlight state once.
   useFocusEffect(
     useCallback(() => {
+      setHidden(false);
       if (apiEnabled && assessment.serverSaved)
         void refreshAssessment(assessment.id).catch(() => {});
     }, [assessment.id]),
@@ -143,7 +145,7 @@ export function ChecklistPhoto({ assessment }: { assessment: Assessment }) {
       <EvidencePhoto
         key={assessment.photo.id}
         photo={assessment.photo}
-        masks={layers}
+        masks={hidden ? [] : layers}
         dimensions={overview.masks[0]}
         caption={
           assessment.photo.sample
@@ -153,12 +155,19 @@ export function ChecklistPhoto({ assessment }: { assessment: Assessment }) {
       />
       {overview.openCount > 0 && (
         <View style={{ gap: 6 }}>
+          <Button
+            label={hidden ? "Show highlights" : "Hide highlights"}
+            variant="secondary"
+            disabled={shown === 0 && !hidden}
+            onPress={() => setHidden((value) => !value)}
+          />
           <Copy kind="small" accessibilityLiveRegion="polite">
+            {hidden ? "Highlights hidden · " : ""}
             {`Highlights available for ${shown} of ${overview.openCount} open finding${overview.openCount === 1 ? "" : "s"}`}
             {overview.pending ? " · more may appear" : ""}
             {failed.length ? " · some could not load" : ""}
           </Copy>
-          {shown > 0 && <SeverityLegend />}
+          {!hidden && shown > 0 && <SeverityLegend />}
           <Copy kind="small">
             {apiEnabled ? "AI-generated" : "Simulated"}, unreviewed highlights
             may mark the wrong object. Unmarked areas have not been checked as
