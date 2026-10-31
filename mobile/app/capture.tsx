@@ -17,8 +17,6 @@ import {
   Button,
   ConfirmDialog,
   Copy,
-  Disclaimer,
-  PreviewNotice,
   Screen,
   Section,
   Step,
@@ -222,8 +220,6 @@ export default function CaptureScreen() {
           }}
         />
       </View>
-      <PreviewNotice />
-      <Disclaimer />
       <ConfirmDialog
         visible={!!leave}
         title="Discard this submission?"

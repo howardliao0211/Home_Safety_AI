@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { restorePortraitDraft } from "./helpers/portrait-photo";
 
 async function assess(page: Page, scenario: string, sample = "living room") {
   await page.goto("/");
@@ -7,7 +8,8 @@ async function assess(page: Page, scenario: string, sample = "living room") {
     .click();
   await page.getByRole("radio", { name: scenario, exact: true }).click();
   await page.getByRole("button", { name: "Start fresh demo" }).click();
-  await page.getByRole("button", { name: `Use ${sample} sample` }).click();
+  if (sample === "portrait room") await restorePortraitDraft(page);
+  else await page.getByRole("button", { name: `Use ${sample} sample` }).click();
   await page.getByRole("button", { name: "Review photo", exact: true }).click();
   await page.getByRole("button", { name: "Create sample assessment" }).click();
 }

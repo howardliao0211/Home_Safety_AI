@@ -7,10 +7,8 @@ import {
   Button,
   ConfirmDialog,
   Copy,
-  Disclaimer,
   Notice,
   PhotoView,
-  PreviewNotice,
   Screen,
   Step,
 } from "@/components/ui";
@@ -102,8 +100,6 @@ function AnalysisScreen() {
           />
         </>
       )}
-      <PreviewNotice />
-      <Disclaimer />
       <ConfirmDialog
         visible={deleting}
         title="Delete this assessment?"

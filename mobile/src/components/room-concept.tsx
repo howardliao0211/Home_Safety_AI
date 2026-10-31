@@ -14,7 +14,7 @@ import { usePreview } from "@/hooks/preview-context";
 import { conceptDisclaimer, conceptStatus } from "@/domain/room-concept";
 import type { Assessment } from "@/domain/model";
 import { roomSources } from "@/domain/samples";
-import { Button, Copy, Notice, PreviewNotice, Screen } from "./ui";
+import { Button, Copy, Notice, Screen } from "./ui";
 
 /** Observe only while focused and active. Background jobs never depend on this poll. */
 function useConceptObservation(
@@ -139,7 +139,6 @@ export function RoomConceptViewer({ assessment }: { assessment: Assessment }) {
         AI-generated room concept
       </Copy>
       <Copy>{conceptDisclaimer}</Copy>
-      <PreviewNotice />
       {!apiEnabled && (
         <Copy kind="small">
           Simulated concept: this sample image is not an edit of your room.

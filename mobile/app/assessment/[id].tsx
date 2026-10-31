@@ -10,10 +10,8 @@ import {
   Button,
   ConfirmDialog,
   Copy,
-  Disclaimer,
   Notice,
   Panel,
-  PreviewNotice,
   Screen,
   styles,
 } from "@/components/ui";
@@ -95,7 +93,6 @@ function AssessmentScreen() {
           {assessment.householdContext || "No additional details"}
         </Copy>
       </View>
-      <PreviewNotice />
       {total ? (
         <>
           <Panel style={{ backgroundColor: colors.soft, borderWidth: 0 }}>
@@ -171,7 +168,6 @@ function AssessmentScreen() {
         </Notice>
       )}
       <NewAssessmentButton label="New assessment" secondary />
-      <Disclaimer />
       <Button
         label="Delete assessment"
         icon="trash"

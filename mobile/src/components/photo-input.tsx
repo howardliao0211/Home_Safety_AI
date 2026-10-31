@@ -153,7 +153,7 @@ export function PhotoInput({
       )}
       <Copy kind="eyebrow">OR EXPLORE WITH A SAMPLE</Copy>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-        {(Object.keys(sampleNames) as Sample[]).map((sample) => (
+        {(["living", "quiet"] satisfies Sample[]).map((sample) => (
           <Pressable
             key={sample}
             accessibilityRole="button"

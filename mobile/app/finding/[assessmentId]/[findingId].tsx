@@ -8,11 +8,9 @@ import { Severity } from "@/components/finding-card";
 import {
   Button,
   Copy,
-  Disclaimer,
   Notice,
   Panel,
   PhotoView,
-  PreviewNotice,
   Screen,
   Section,
   styles,
@@ -51,7 +49,6 @@ export default function FindingScreen() {
         assessment={assessment}
         finding={finding}
       />
-      <PreviewNotice />
       <Section
         title={apiEnabled ? "Visible evidence" : "What the sample describes"}
       >
@@ -196,7 +193,6 @@ export default function FindingScreen() {
           onPress={() => router.dismissTo(`/assessment/${assessmentId}`)}
         />
       </Section>
-      <Disclaimer />
     </Screen>
   );
 }

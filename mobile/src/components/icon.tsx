@@ -27,7 +27,7 @@ const paths: Partial<Record<IconName, string>> = {
   info: "M12 11v6m0-10v.01",
   chevron: "m9 5 7 7-7 7",
   refresh:
-    "M20 7v5h-5M4 17v-5h5M5 8a8 8 0 0 1 13-3l2 3M4 16l2 3a8 8 0 0 0 13-3",
+    "M20 10a8 8 0 0 0-14-3L3 10V4m0 6h6M4 14a8 8 0 0 0 14 3l3-3v6m0-6h-6",
   trash: "M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7",
   eye: "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12",
 };

@@ -20,14 +20,7 @@ import { useNavigation, usePreventRemove } from "expo-router/react-navigation";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AssessmentGate } from "@/components/assessment-gate";
-import {
-  Button,
-  Copy,
-  Disclaimer,
-  Notice,
-  PreviewNotice,
-  styles,
-} from "@/components/ui";
+import { Button, Copy, Notice, styles } from "@/components/ui";
 import { colors, tokens } from "@/components/theme";
 import { usePreview } from "@/hooks/preview-context";
 import {
@@ -288,7 +281,6 @@ function Chat({ aid, fid }: { aid: string; fid: string }) {
           <Copy kind="heading" accessibilityRole="header">
             {finding.title}
           </Copy>
-          <PreviewNotice />
           {loading && !conversation && (
             <ActivityIndicator
               color={colors.accent}
@@ -384,7 +376,6 @@ function Chat({ aid, fid }: { aid: string; fid: string }) {
                 </Copy>
               </Notice>
             )}
-          <Disclaimer />
         </ScrollView>
         <ScrollView
           style={{ flexGrow: 0, flexShrink: 0, maxHeight: "60%" }}

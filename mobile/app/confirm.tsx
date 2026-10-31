@@ -9,11 +9,9 @@ import {
 import {
   Button,
   Copy,
-  Disclaimer,
   Notice,
   Panel,
   PhotoView,
-  PreviewNotice,
   Screen,
   Step,
 } from "@/components/ui";
@@ -87,8 +85,6 @@ export default function ConfirmScreen() {
           })
         }
       />
-      <PreviewNotice />
-      <Disclaimer />
     </Screen>
   );
 }
