@@ -18,7 +18,7 @@ export function SeverityLegend({ only }: { only?: Finding["severity"] }) {
   return (
     <View
       accessibilityLabel={`Highlight colours: ${items
-        .map((s) => `${severityColors[s].name} for ${s} severity`)
+        .map((s) => `${severityColors[s].name} for ${s} priority`)
         .join(", ")}.`}
       accessible
       style={{ flexDirection: "row", flexWrap: "wrap", gap: 14 }}
@@ -39,7 +39,7 @@ export function SeverityLegend({ only }: { only?: Finding["severity"] }) {
             }}
           />
           <Copy kind="small" style={{ color: colors.ink }}>
-            {severityColors[severity].name} · {severity}
+            {severity} priority
           </Copy>
         </View>
       ))}
@@ -169,9 +169,7 @@ export function ChecklistPhoto({ assessment }: { assessment: Assessment }) {
           </Copy>
           {!hidden && shown > 0 && <SeverityLegend />}
           <Copy kind="small">
-            {apiEnabled ? "AI-generated" : "Simulated"}, unreviewed highlights
-            may mark the wrong object. Unmarked areas have not been checked as
-            safe.
+            Unmarked areas have not been checked as safe.
           </Copy>
         </View>
       )}

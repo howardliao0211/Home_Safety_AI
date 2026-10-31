@@ -115,15 +115,26 @@ function Navigation() {
     >
       <Stack.Screen
         name="index"
-        options={{ title: "Home Safety AI", headerBackVisible: false }}
+        options={{
+          title: "Home Safety AI",
+          headerTitle: "",
+          headerBackVisible: false,
+        }}
       />
       <Stack.Screen name="account" options={{ title: "Account" }} />
-      <Stack.Screen name="capture" options={{ title: "Your room" }} />
-      <Stack.Screen name="confirm" options={{ title: "Ready to review" }} />
+      <Stack.Screen
+        name="capture"
+        options={{ title: "Your room", headerTitle: "" }}
+      />
+      <Stack.Screen
+        name="confirm"
+        options={{ title: "Ready to review", headerTitle: "" }}
+      />
       <Stack.Screen
         name="analysis/[id]"
         options={{
           title: "Room assessment",
+          headerTitle: "",
           headerBackVisible: false,
           headerLeft: () => <HomeLink />,
         }}
@@ -132,6 +143,7 @@ function Navigation() {
         name="assessment/[id]"
         options={{
           title: "Your checklist",
+          headerTitle: "",
           headerBackVisible: false,
           headerLeft: () => <HomeLink />,
         }}
@@ -142,7 +154,7 @@ function Navigation() {
       />
       <Stack.Screen
         name="finding/[assessmentId]/[findingId]"
-        options={{ title: "Finding details" }}
+        options={{ title: "Finding details", headerTitle: "" }}
       />
       <Stack.Screen
         name="evidence/[assessmentId]/[findingId]"
@@ -152,7 +164,10 @@ function Navigation() {
         name="chat/[assessmentId]/[findingId]"
         options={{ title: "Chat about it" }}
       />
-      <Stack.Screen name="preview" options={{ title: "Preview tools" }} />
+      <Stack.Screen
+        name="preview"
+        options={{ title: "Preview tools", headerTitle: "" }}
+      />
     </Stack>
   );
 }

@@ -19,6 +19,7 @@ function AuthAction({
   onPress,
   danger = false,
   primary = false,
+  secondary = false,
   disabled = false,
 }: {
   busy?: boolean;
@@ -26,6 +27,8 @@ function AuthAction({
   onPress: () => void;
   danger?: boolean;
   primary?: boolean;
+  /** Outlined button for important, non-destructive actions. */
+  secondary?: boolean;
   disabled?: boolean;
 }) {
   return (
@@ -43,7 +46,11 @@ function AuthAction({
           ? colors.danger
           : primary
             ? colors.accent
-            : "transparent",
+            : secondary
+              ? colors.surface
+              : "transparent",
+        borderWidth: secondary ? 1.5 : 0,
+        borderColor: colors.accent,
         opacity: busy || disabled ? 0.5 : pressed ? 0.8 : 1,
       })}
     >
@@ -61,15 +68,7 @@ function AuthAction({
   );
 }
 
-export function AuthScreen({
-  account = false,
-  onRefresh,
-  refreshDisabled = false,
-}: {
-  account?: boolean;
-  onRefresh?: () => Promise<void>;
-  refreshDisabled?: boolean;
-}) {
+export function AuthScreen({ account = false }: { account?: boolean }) {
   const auth = useAuth();
   const [mode, setMode] = useState<"login" | "signup" | "reset">("login");
   const [email, setEmail] = useState("");
@@ -249,17 +248,9 @@ export function AuthScreen({
                 />
               </>
             )}
-            {account && verified && onRefresh && (
-              <AuthAction
-                busy={busy}
-                primary
-                label="Refresh latest assessment"
-                disabled={refreshDisabled}
-                onPress={() => void act(onRefresh)}
-              />
-            )}
             <AuthAction
               busy={busy}
+              secondary
               label="Sign out"
               onPress={() => void act(auth.logout)}
             />

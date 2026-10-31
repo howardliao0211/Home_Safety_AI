@@ -30,7 +30,7 @@ test("portrait photo is shown whole with progressive severity highlights for ope
     page.getByText(/Highlights available for 3 of 3 open findings/),
   ).toBeVisible({ timeout: 10_000 });
   await expect(masks(page)).toHaveCount(3);
-  for (const label of ["Red · High", "Yellow · Medium", "Green · Low"])
+  for (const label of ["High priority", "Medium priority", "Low priority"])
     await expect(page.getByText(label, { exact: true }).first()).toBeVisible();
   // Whole portrait photo: the canvas keeps the 2:3 source aspect, uncropped.
   const box = (await photo.boundingBox())!;
@@ -102,7 +102,9 @@ test("finding details show the finding's severity colour; unsupported findings a
   const src = await masks(page).first().getAttribute("src");
   expect(decodeURIComponent(src!)).toContain("#dc2626");
   await expect(
-    page.getByText("Red · High", { exact: true }).locator("visible=true"),
+    page
+      .getByLabel("Highlight colours: Red for High priority.", { exact: true })
+      .locator("visible=true"),
   ).toHaveCount(1);
 
   await assess(page, "A closer look", "living room");
