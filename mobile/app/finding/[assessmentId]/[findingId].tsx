@@ -24,15 +24,12 @@ export default function FindingScreen() {
     assessmentId: string;
     findingId: string;
   }>();
-  const { state, changeStatus, skip } = usePreview();
+  const { state, changeStatus } = usePreview();
   const assessment = state.assessments.find((a) => a.id === assessmentId);
   const finding = assessment?.findings.find((f) => f.id === findingId);
   const [dismissing, setDismissing] = useState(false);
   const [note, setNote] = useState(finding?.note || "");
   if (!assessment || !finding) return <Redirect href="/" />;
-  const pendingFollowUp = finding.submissions.some(
-    (s) => s.kind === "follow-up" && s.status !== "complete",
-  );
   return (
     <Screen>
       <Severity severity={finding.severity} />
@@ -66,48 +63,24 @@ export default function FindingScreen() {
       <Notice title="What we can’t tell from a photo">
         <Copy>{finding.uncertainty}</Copy>
       </Notice>
-      {finding.followUp && (
-        <Panel>
-          <Copy kind="eyebrow">A CLOSER LOOK</Copy>
-          <Copy>{finding.followUp.question}</Copy>
-          {finding.followUp.state === "available" ? (
-            <>
-              <Button
-                label={
-                  pendingFollowUp
-                    ? "Continue follow-up"
-                    : finding.followUp.kind === "photo"
-                      ? "Add a close-up photo"
-                      : "Answer a question"
-                }
-                icon={finding.followUp.kind === "photo" ? "camera" : "arrow"}
-                variant="secondary"
-                onPress={() =>
-                  router.push({
-                    pathname: "/evidence/[assessmentId]/[findingId]",
-                    params: { assessmentId, findingId, kind: "follow-up" },
-                  })
-                }
-              />
-              {!pendingFollowUp && (
-                <Button
-                  label="Skip for now"
-                  variant="text"
-                  onPress={() => void skip(assessmentId, findingId)}
-                />
-              )}
-            </>
-          ) : (
-            <Copy kind="small">
-              {finding.followUp.state === "skipped"
-                ? "You skipped this request. Uncertainty remains; you can still request a photo review."
-                : apiEnabled
-                  ? "Follow-up received. The finding was updated; you decide its status."
-                  : "Follow-up received. The sample finding was updated; you decide its status."}
-            </Copy>
-          )}
-        </Panel>
-      )}
+      <Panel>
+        <Copy kind="heading">Questions about this finding?</Copy>
+        <Copy>
+          Chat offers guidance. You decide what to do and when to change its
+          status.
+        </Copy>
+        <Button
+          label="Chat about it"
+          variant="secondary"
+          icon="arrow"
+          onPress={() =>
+            router.push({
+              pathname: "/chat/[assessmentId]/[findingId]",
+              params: { assessmentId, findingId },
+            })
+          }
+        />
+      </Panel>
       {finding.submissions
         .filter((s) => s.status === "complete")
         .map((s) => (
@@ -157,8 +130,8 @@ export default function FindingScreen() {
         ))}
       <Section title="You make the final call">
         <Copy kind="small">
-          A photo check can add context. Only you decide when a finding is
-          resolved.
+          Chat can help you consider your next step. Only you decide when a
+          finding is resolved.
         </Copy>
         <Button
           label={finding.status === "open" ? "Mark resolved" : "Reopen finding"}
@@ -171,22 +144,6 @@ export default function FindingScreen() {
             )
           }
         />
-        <Button
-          label="Ask AI to check"
-          icon="camera"
-          variant="secondary"
-          onPress={() =>
-            router.push({
-              pathname: "/evidence/[assessmentId]/[findingId]",
-              params: { assessmentId, findingId, kind: "review" },
-            })
-          }
-        />
-        <Copy kind="small">
-          {apiEnabled
-            ? "A review adds evidence; you decide whether to resolve the finding."
-            : "Photo review is simulated in this preview."}
-        </Copy>
         {finding.status === "open" && !dismissing && (
           <Button
             label="Dismiss as not relevant"

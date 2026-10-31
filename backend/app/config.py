@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     annotation_worker_url: str = ""
     annotation_worker_service_account: str = ""
     annotation_tasks_queue: str = ""
+    # Deployment contract: set to the selected provider/model's documented window.
+    chat_context_tokens: int = 65536
+    chat_image_token_reserve: int = 32768
     model_timeout_seconds: float = 90
     google_cloud_project: str = "home-safety-local"
     firestore_database_id: str = "(default)"
@@ -34,6 +37,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_environment(self):
+        if self.chat_context_tokens < 1 or self.chat_image_token_reserve < 1:
+            raise ValueError("Chat context and image token budgets must be positive")
         if not 1 <= self.model_timeout_seconds <= 120:
             raise ValueError("MODEL_TIMEOUT_SECONDS must be between 1 and 120")
         if self.model_provider == "groq":

@@ -6,13 +6,15 @@ from pydantic import BaseModel
 
 from app.config import Settings
 from app.errors import ModelError
-from app.models.providers.base import ImageInput
+from app.models.providers.base import ImageInput, http_model_error
 
 
 class GroqProvider:
     name = "groq"
 
     def __init__(self, settings: Settings, client: httpx.Client | None = None):
+        self.chat_context_tokens = settings.chat_context_tokens
+        self.chat_image_token_reserve = settings.chat_image_token_reserve
         self.model = settings.groq_model
         self.client = client or httpx.Client(
             base_url="https://api.groq.com/openai/v1/",
@@ -60,7 +62,7 @@ class GroqProvider:
         except httpx.TransportError:
             raise ModelError("transport") from None
         if response.is_error:
-            raise ModelError("upstream_http", upstream_status=response.status_code)
+            raise http_model_error(response)
         try:
             choice = response.json()["choices"][0]
             if choice["finish_reason"] != "stop" or choice["message"].get("refusal"):

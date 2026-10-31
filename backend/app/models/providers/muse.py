@@ -6,13 +6,15 @@ from pydantic import BaseModel
 
 from app.config import Settings
 from app.errors import ModelError
-from app.models.providers.base import ImageInput
+from app.models.providers.base import ImageInput, http_model_error
 
 
 class MuseProvider:
     name = "muse"
 
     def __init__(self, settings: Settings, client: httpx.Client | None = None):
+        self.chat_context_tokens = settings.chat_context_tokens
+        self.chat_image_token_reserve = settings.chat_image_token_reserve
         self.model = settings.muse_main_model
         self.client = client or httpx.Client(
             base_url="https://api.meta.ai/v1/",
@@ -56,7 +58,7 @@ class MuseProvider:
         except httpx.TransportError:
             raise ModelError("transport") from None
         if response.is_error:
-            raise ModelError("upstream_http", upstream_status=response.status_code)
+            raise http_model_error(response)
         try:
             body = response.json()
             if body["status"] != "completed":

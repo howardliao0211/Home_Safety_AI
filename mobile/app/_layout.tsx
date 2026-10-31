@@ -144,6 +144,10 @@ function Navigation() {
         name="evidence/[assessmentId]/[findingId]"
         options={{ title: "Add evidence" }}
       />
+      <Stack.Screen
+        name="chat/[assessmentId]/[findingId]"
+        options={{ title: "Chat about it" }}
+      />
       <Stack.Screen name="preview" options={{ title: "Preview tools" }} />
     </Stack>
   );

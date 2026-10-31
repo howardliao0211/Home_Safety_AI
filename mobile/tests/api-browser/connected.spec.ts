@@ -87,12 +87,12 @@ test.afterEach(async ({ page, request }) => {
   }
 });
 
-test("connected lifecycle: upload, retained failures, retry, cache-free restore, status, follow-up, review and deletion", async ({
+test("connected lifecycle: upload, retained failures, retry, cache-free restore, status, persistent finding chat and deletion", async ({
   page,
   request,
 }) => {
   await request.post(backend + "/__test/control", {
-    data: { fail_initial: 1, fail_revision: 1 },
+    data: { fail_initial: 1, fail_chat: 1 },
   });
   let uploads = 0;
   page.on("request", (r) => {
@@ -154,64 +154,88 @@ test("connected lifecycle: upload, retained failures, retry, cache-free restore,
   await page
     .getByRole("button", { name: "View Keep the walkway clear", exact: true })
     .click();
-  await page
-    .getByRole("button", { name: "Answer a question", exact: true })
-    .click();
-  await page
-    .getByRole("textbox", { name: "Your answer", exact: true })
-    .fill("Yes, we use it at night.");
-  await page
-    .getByRole("button", { name: "Submit follow-up", exact: true })
-    .click();
+  await expect(page).toHaveURL(/\/finding\//);
+  const findingUrl = page.url();
   await expect(
-    page.getByRole("button", { name: "Retry check", exact: true }),
+    page.getByRole("button", { name: "Ask AI to check", exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Chat about it", exact: true })
+    .click();
+  // The server accepts the turn, but the first response is lost in transport.
+  await page.route("**/chat/turns", async (route) => {
+    await route.fetch();
+    await route.abort("failed");
+    await page.unroute("**/chat/turns");
+  });
+  await page
+    .getByRole("textbox", { name: "Your question", exact: true })
+    .fill("How does this affect night use?");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Continue reply", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("textbox", { name: "Your answer", exact: true }),
-  ).not.toBeEditable();
+    page.getByRole("textbox", { name: "Your question", exact: true }),
+  ).toHaveValue("");
+  await page
+    .getByRole("button", { name: "Continue reply", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Retry reply", exact: true }),
+  ).toBeVisible();
   await page.reload();
   await expect(
-    page.getByRole("textbox", { name: "Your answer", exact: true }),
-  ).toHaveValue("Yes, we use it at night.");
-  await page.getByRole("button", { name: "Retry check", exact: true }).click();
-  await expect(page.getByText(/Follow-up received/)).toBeVisible();
+    page.getByRole("textbox", { name: "Your question", exact: true }),
+  ).toHaveValue("");
+  // Completion is persisted even if the success response is lost.
+  await page.route("**/chat/turns/*/generate", async (route) => {
+    await route.fetch();
+    await route.abort("failed");
+    await page.unroute("**/chat/turns/*/generate");
+  });
+  await page.getByRole("button", { name: "Retry reply", exact: true }).click();
   await expect(
-    page.getByText("Additional evidence was considered in this linked check.", {
+    page.getByText("Keep the route clear; only you decide its status.", {
       exact: true,
     }),
   ).toBeVisible();
-  let stored = await serverAssessment(page, request);
+  await page
+    .getByRole("textbox", { name: "Your question", exact: true })
+    .fill("Does that also apply during the day?");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(
+    page.getByText(
+      "Our earlier discussion is included. Keep the route clear; only you decide its status.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  const stored = await serverAssessment(page, request);
   const walkway = stored.findings.find(
     (f: { title: string }) => f.title === "Keep the walkway clear",
   );
   expect(walkway.status).toBe("open");
-  expect(walkway.submissions).toHaveLength(1);
-  expect(walkway.submissions[0].attempts).toBe(2);
-  await page.getByRole("button", { name: "Back to checklist" }).click();
+  expect(walkway.submissions).toHaveLength(0);
+  const chatPath =
+    backend + `/v1/assessments/${assessmentId}/findings/${walkway.id}/chat`;
+  const conversation = await (
+    await request.get(chatPath, {
+      headers: { Authorization: await bearer(page) },
+    })
+  ).json();
+  expect(conversation.turns).toHaveLength(2);
+  expect(
+    conversation.turns.every(
+      (t: { status: string }) => t.status === "complete",
+    ),
+  ).toBe(true);
   await page
-    .getByRole("button", { name: "View Check the cabinet", exact: true })
+    .getByRole("button", { name: "Back to finding", exact: true })
     .click();
-  await page.getByRole("button", { name: "Skip for now", exact: true }).click();
-  await expect(page.getByText(/You skipped this request/)).toBeVisible();
+  await expect(page).toHaveURL(findingUrl);
   await page
-    .getByRole("button", { name: "Ask AI to check", exact: true })
+    .getByRole("button", { name: "Back to checklist", exact: true })
     .click();
-  await page.getByRole("button", { name: "Use quiet room sample" }).click();
-  await page
-    .getByRole("button", { name: "Request photo review", exact: true })
-    .click();
-  await expect(
-    page.getByText("Review received", { exact: true }),
-  ).toBeVisible();
-  stored = await serverAssessment(page, request);
-  const cabinet = stored.findings.find(
-    (f: { title: string }) => f.title === "Check the cabinet",
-  );
-  expect(cabinet.status).toBe("resolved");
-  expect(cabinet.follow_up.state).toBe("skipped");
-  expect(cabinet.submissions[0].photo.uploaded).toBe(true);
-  await page.getByRole("button", { name: "Return to finding" }).click();
-  await page.getByRole("button", { name: "Back to checklist" }).click();
   await page
     .getByRole("button", { name: "Delete assessment", exact: true })
     .click();
@@ -249,7 +273,9 @@ test("network failures retain the session and retry without preview fallback", a
   await page.route(backend + "/v1/assessments", (route) => route.abort());
   await page.reload();
   await expect(
-    page.getByText(/Could not reach the assessment service/),
+    page
+      .getByText(/Could not reach the assessment service/)
+      .filter({ visible: true }),
   ).toBeVisible();
   await expect(
     page.getByText("INTERACTIVE PREVIEW", { exact: true }),
@@ -341,7 +367,9 @@ test("real file upload, failed status write, server restart state and history re
     })
     .click();
   await expect(
-    page.getByText(/Could not reach the assessment service/),
+    page
+      .getByText(/Could not reach the assessment service/)
+      .filter({ visible: true }),
   ).toBeVisible();
   await expect(page.getByText("0 of 2 handled", { exact: true })).toBeVisible();
   expect(

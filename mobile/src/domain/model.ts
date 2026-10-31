@@ -12,7 +12,7 @@ export const scenarios: { id: Scenario; title: string; description: string }[] =
     {
       id: "hazards",
       title: "Everyday hazards",
-      description: "Three findings, a photo follow-up and a text question.",
+      description: "Three findings with independent chats.",
     },
     {
       id: "uncertain",
@@ -31,8 +31,8 @@ export const scenarios: { id: Scenario; title: string; description: string }[] =
     },
     {
       id: "update-error",
-      title: "Follow-up / review retry",
-      description: "Each new linked submission fails once, then succeeds.",
+      title: "Chat reply retry",
+      description: "Each chat reply fails once; manual retry succeeds.",
     },
     {
       id: "permission-denied",
@@ -64,6 +64,7 @@ export type Submission = {
   frozen?: boolean;
 };
 export type Finding = {
+  localChat?: import("./chat").LocalChat;
   contentRevision?: string;
   annotation?: Annotation | null;
   annotations?: Annotation[];
@@ -172,6 +173,24 @@ export function recoverInterrupted(state: AppState): AppState {
         : {}),
       findings: a.findings.map((f) => ({
         ...f,
+        localChat: f.localChat?.preview
+          ? {
+              ...f.localChat,
+              preview: {
+                ...f.localChat.preview,
+                turns: f.localChat.preview.turns.map((t) =>
+                  t.status === "running"
+                    ? {
+                        ...t,
+                        status: "failed" as const,
+                        error:
+                          "The simulated reply was interrupted. Retry when ready.",
+                      }
+                    : t,
+                ),
+              },
+            }
+          : f.localChat,
         submissions: f.submissions.map((s) =>
           s.status === "running"
             ? {

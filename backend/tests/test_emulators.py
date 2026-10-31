@@ -143,3 +143,59 @@ def test_real_model_photo_assessment_and_review(monkeypatch):
                 assert finding["status"] == "open" and finding["submissions"][0]["feedback"]
         finally:
             client.delete(path)
+
+
+def test_finding_chat_persists_across_clients_and_deletes_with_assessment(photo_bytes, monkeypatch):
+    monkeypatch.setenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")
+    config = Settings(
+        _env_file=None,
+        groq_api_key="unused",
+        groq_model="unused",
+        firestore_emulator_host="127.0.0.1:8080",
+        storage_emulator_host="http://127.0.0.1:4443",
+    )
+    uid, aid, tid = new_id(), new_id(), new_id()
+    provider = StubProvider()
+    base = f"/v1/assessments/{aid}"
+    with TestClient(create_app(config, provider=provider)) as client:
+        client.headers["Authorization"] = "Bearer " + uid
+        try:
+            assert (
+                client.post(
+                    "/v1/assessments",
+                    data={"assessment_id": aid},
+                    files={"photo": ("room.png", photo_bytes)},
+                ).status_code
+                == 201
+            )
+            result = client.post(base + "/analyze").json()
+            fid = result["findings"][0]["id"]
+            path = base + f"/findings/{fid}/chat"
+            question = {"id": tid, "question": "What can I do about the cable?"}
+            accepted = client.post(path + "/turns", json=question)
+            assert accepted.status_code == 201, accepted.text
+            # Independent Firestore SDK client sees the accepted question before generation.
+            repo = FirestoreRepository(config)
+            try:
+                saved = repo.get(uid, aid)
+                assert saved.findings[0].chat[0].question == question["question"]
+                assert saved.findings[0].chat[0].status == "ready"
+            finally:
+                repo.close()
+            provider.results.append(
+                {"answer": "Keep the route clear if safe. The photo cannot establish safety."}
+            )
+            generated = client.post(path + f"/turns/{tid}/generate", json={"attempt_id": new_id()})
+            assert generated.status_code == 200, generated.text
+            with TestClient(create_app(config, provider=StubProvider())) as another_installation:
+                another_installation.headers["Authorization"] = "Bearer " + uid
+                assert another_installation.get(path).json() == generated.json()
+            assert client.delete(base).status_code == 204
+            assert client.get(path).status_code == 404
+            repo = FirestoreRepository(config)
+            try:
+                assert repo.get(uid, aid) is None
+            finally:
+                repo.close()
+        finally:
+            client.delete(base)

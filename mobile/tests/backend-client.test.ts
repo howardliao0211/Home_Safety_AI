@@ -282,3 +282,38 @@ test("identity is durable across clients, concurrent initialization shares one U
   fail = false;
   assert.equal(await broken.get(), id);
 });
+
+test("chat reads never generate and explicit sends retain stable request identities", async () => {
+  const requests: { path: string; method: string; body: unknown }[] = [];
+  const client = new BackendClient(
+    { baseUrl: "https://example.test", getToken: async () => "owner-token" },
+    async () => {
+      throw new Error("Chat must not attach photos");
+    },
+    async (path, init) => {
+      requests.push({
+        path: String(path),
+        method: init?.method ?? "GET",
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+      });
+      return Response.json({
+        turns: [],
+        blocked_reason: null,
+        max_question_length: 2000,
+      });
+    },
+  );
+  await client.chat(id, "finding-id");
+  assert.deepEqual(
+    requests.map((r) => r.method),
+    ["GET"],
+  );
+  const input = { id: "turn-id", question: "Does that help at night?" };
+  await client.acceptChat(id, "finding-id", input);
+  await client.acceptChat(id, "finding-id", input);
+  assert.deepEqual(requests[1].body, input);
+  assert.deepEqual(requests[2], requests[1]);
+  await client.generateChat(id, "finding-id", "turn-id", "attempt-id");
+  assert.match(requests[3].path, /chat\/turns\/turn-id\/generate$/);
+  assert.deepEqual(requests[3].body, { attempt_id: "attempt-id" });
+});

@@ -1,3 +1,8 @@
+> Finding-chat cutover: historical follow-up/photo-review observations below
+> describe the previous frontend. Current controls offer **Chat about it** on every
+> finding, with text-only guidance and user-controlled checklist status. Saved
+> historical evidence remains viewable; new evidence submissions are no longer offered.
+
 > Authentication cutover: the observations below predate managed accounts where
 > they describe device IDs/demo tokens. Current setup and pending Android/iOS
 > validation are in [authentication](authentication.md). Automated emulator checks
@@ -324,3 +329,37 @@ Record representative live cases here, for example:
   localisation review; positional words in prompts are unreliable.
 - Portrait, landscape and EXIF-rotated photos on Android: the inline overlay must
   stay aligned.
+
+## Finding chat verification
+
+Current workflow: open any finding → **Chat about it** → write a text question →
+**Send**. Reopen to read saved history without calling the model. Ask a second
+question referring to the answer. Status remains entirely controlled by the user.
+Use **Chat reply retry** in Preview tools to demonstrate saved failure and manual
+retry, including keeping a separate new unsent draft through restart.
+
+Focused backend/API checks cover idempotent acceptance and generation attempts,
+current finding/household context, historical text without historical photo binaries,
+conversation isolation, expiry/recovery and deletion racing generation. Browser
+checks cover removed controls, guarded evidence URLs, chat navigation, local drafts,
+reply failure/retry and narrow layouts. See backend README for concrete storage and
+model-context limits; reaching them keeps history readable and drafts intact.
+
+Results at implementation (2026-11-01, deterministic test provider, no paid model):
+
+- Backend incl. Firestore/Auth/Storage emulators: 119 passed, 2 skipped (opt-in
+  paid-model and emulator-restart checks). Independent Firestore clients confirmed
+  accepted questions persist before generation, replies survive fresh clients and
+  assessment deletion removes chat.
+- Mobile unit: 21 passed. Typecheck passed.
+- Preview browser: 17 checks passed (full run had 3 selector/obsolete-test failures,
+  fixed and rerun individually). `finding-chat.spec.ts`: 3 passed after final layout.
+- Connected browser: 9 checks passed (1 selector failure fixed and rerun),
+  including lost acceptance/completion responses, failure/manual retry, database
+  history and deletion.
+- Screenshots at 320×650 and 24px text: composer and **Send** fully reachable, no
+  horizontal overflow; footer scrolls under large text.
+
+Physical Android/iOS keyboard, system/gesture back, large system fonts and
+TalkBack/VoiceOver still require a device. No real-model quality or native-device
+verification is implied by deterministic tests or browser screenshots.

@@ -76,6 +76,7 @@ export function fromServer(
       const old = cached?.findings.find((f) => f.id === item.id);
       return {
         id: item.id,
+        localChat: old?.localChat,
         contentRevision: item.content_revision || "initial",
         annotation: item.annotation,
         annotations: item.annotations || [],
@@ -377,6 +378,45 @@ export class BackendClient {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ kind: "wrong_object" }),
+        },
+      )
+    ).json();
+  }
+  private chatPath(assessmentId: string, findingId: string) {
+    return `/v1/assessments/${assessmentId}/findings/${findingId}/chat`;
+  }
+  async chat(
+    assessmentId: string,
+    findingId: string,
+  ): Promise<import("../domain/chat").Conversation> {
+    return (await this.request(this.chatPath(assessmentId, findingId))).json();
+  }
+  async acceptChat(
+    assessmentId: string,
+    findingId: string,
+    body: { id: string; question: string },
+  ): Promise<import("../domain/chat").Conversation> {
+    return (
+      await this.request(this.chatPath(assessmentId, findingId) + "/turns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+    ).json();
+  }
+  async generateChat(
+    assessmentId: string,
+    findingId: string,
+    turnId: string,
+    attemptId: string,
+  ): Promise<import("../domain/chat").Conversation> {
+    return (
+      await this.request(
+        this.chatPath(assessmentId, findingId) + `/turns/${turnId}/generate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ attempt_id: attemptId }),
         },
       )
     ).json();

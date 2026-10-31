@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import Annotated, Literal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -177,7 +177,31 @@ class FeedbackRequest(StrictModel):
     kind: Literal["wrong_object"]
 
 
+class ChatTurn(StrictModel):
+    id: str
+    question: str = Field(min_length=1, max_length=2000)
+    answer: str | None = None
+    status: OperationStatus = "ready"
+    error: str | None = None
+    created_at: datetime = Field(default_factory=now)
+    finished_at: datetime | None = None
+    attempt_ids: list[str] = Field(default_factory=list)
+    expires_at: datetime | None = None
+    execution: str | None = None
+
+
+class ChatRequest(StrictModel):
+    id: UUID
+    question: str = Field(min_length=1, max_length=2000)
+
+
+class ChatGeneration(StrictModel):
+    attempt_id: UUID
+
+
 class Finding(FindingContent):
+    chat: list[ChatTurn] = Field(default_factory=list)
+    chat_blocked: str | None = None
     id: str = Field(default_factory=new_id)
     status: FindingStatus = "open"
     note: str = ""

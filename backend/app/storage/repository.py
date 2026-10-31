@@ -35,7 +35,10 @@ class AssessmentRepository(Protocol):
 
 def check_size(assessment: Assessment):
     # Leave headroom below Firestore's 1 MiB document limit, including field overhead.
-    if len(assessment.model_dump_json().encode()) > 750_000:
+    reply_reserve = sum(
+        24_000 for f in assessment.findings for t in f.chat if t.status != "complete"
+    )
+    if len(assessment.model_dump_json().encode()) + reply_reserve > 750_000:
         raise AppError(409, "assessment_full", "This assessment has reached its storage limit.")
 
 

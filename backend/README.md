@@ -1,6 +1,6 @@
 # Backend development
 
-FastAPI implements photo assessments, focused follow-ups, user-requested photo
+FastAPI implements photo assessments, saved finding chat, and legacy user-requested photo
 reviews, finding status/checklist actions, latest-assessment retrieval, retained
 evidence, and retryable deletion. Muse is the demo model provider; Groq remains an explicit development option. The
 Expo frontend connects to this API by default; explicit preview mode remains
@@ -280,3 +280,69 @@ Mask assets and metadata are deleted with their assessment. Dispatch recovery al
 sweeps orphan masks; private keys and image/mask payloads never enter diagnostics.
 `/internal/annotations/work` and `/internal/annotations/recover` require verified
 Google OIDC tokens from the configured service identity, not a client demo token.
+
+
+## Finding chat
+
+The mobile finding screen offers **Chat about it** for every status. It no longer
+submits follow-up or photo-review evidence. Legacy submission endpoints remain
+compatible and completed evidence/revisions stay readable.
+
+Authenticated endpoints, scoped to `/v1/assessments/{aid}/findings/{fid}/chat`:
+
+| Method/path | Behavior |
+| --- | --- |
+| `GET` | Saved ordered turns and pending/failed state; no generation |
+| `POST /turns` | JSON `{id: UUID, question: string}`; persists before generation |
+| `POST /turns/{tid}/generate` | JSON `{attempt_id: UUID}`; one explicit generation/retry |
+
+Repeat the same turn ID/question to reconcile a lost acceptance response. Different
+input with that ID conflicts. Each explicit manual retry uses a fresh attempt ID;
+replaying an attempt ID returns saved state without another model call. Only one
+unfinished turn per finding is accepted across devices. `ready` has not started;
+`running` expires after 300 seconds into an interrupted failure on read. Reopening
+or polling never starts generation. An answer is saved before completion is returned.
+Clients read history again after ambiguous responses, then offer manual Continue or
+Retry. No provider fallback or automatic model retry occurs.
+
+Chat is embedded as bounded per-finding operation records in the existing atomic
+Firestore assessment document. It is omitted from normal assessment DTOs and exposed
+only on the chat API. Transactions fence the active owner and deletion state, retain
+concurrent status/highlight changes, and never recreate missing records. Assessment
+and account deletion therefore cover all chat records using their existing retryable
+flows. No additional collection, index, retention policy or migration is required.
+
+Limits (enforced before acceptance and rechecked before generation):
+
+- Question: 1–2,000 characters, excluding whitespace-only input; reply: 3,000 characters.
+- 12 turns per finding; at most 10 explicit generation attempts per turn.
+- 120,000 serialized chat bytes per assessment, with 40,000 bytes of acceptance
+  headroom for a question, reply and metadata. No new chat is accepted once the
+  assessment reaches 650,000 bytes. The existing 750,000-byte guard also reserves
+  24,000 bytes for every unfinished reply, protecting concurrent writes.
+- Context: at most 24,000 UTF-8 bytes for complete JSON context, safety instructions
+  and output schema. Earlier chat and completed historical text are never truncated
+  or summarised. Only the original room photo is resent, through private photo access.
+- Model budget: `CHAT_CONTEXT_TOKENS` defaults to 65,536; set it to no more than the
+  selected model's documented context window. `CHAT_IMAGE_TOKEN_RESERVE` defaults
+  to 32,768 for the existing maximum 1,600px original photo; increase it if the
+  provider's image token accounting requires more. The text byte budget is reduced
+  further to reserve these image tokens, 6,000 output tokens and 2,048 transport
+  overhead tokens. One token per UTF-8 text byte is a conservative bound, rather
+  than the usual English chars/token estimate. A model/budget too small disables
+  sending while preserving history. The provider/model must support the chosen
+  image reserve and a 6,000-token output allocation.
+
+Both Muse and Groq use the shared adapter boundary, strict `{answer}` output and
+application-owned history. [Groq Scout's documented window](https://console.groq.com/docs/model/meta-llama/llama-4-scout-17b-16e-instruct)
+is 128K. Muse capacity depends on the configured `MUSE_MAIN_MODEL`; the existing
+sample does not establish a universal window, so confirm the deployment's model
+allowance before increasing defaults. Recognised provider capacity errors permanently
+block further sending for that conversation and show a context-limit explanation,
+not a transient Retry action. Other generation failures retain the saved question.
+No conversation text, photo payload or provider body is logged routinely.
+
+Preview uses separate local conversation state and simulated replies, including a
+**Chat reply retry** scenario. Account-backed chat is always refetched on reopen;
+local unsent drafts and uncertain acceptance identities survive restart and are
+removed with assessment deletion or account cleanup.

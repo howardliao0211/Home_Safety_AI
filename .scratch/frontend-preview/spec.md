@@ -22,7 +22,7 @@ with a calm, warm, readable interface, targeting Android first.
 ## Delivery boundary
 
 - Deliver working navigation, real photo input, simulated analysis, finding
-  actions, linked follow-ups, and local restart persistence.
+  actions, finding chat, and local restart persistence.
 - Review in a browser and on an Android phone through Expo Go. Browser preview
   supports quick review; Android is the physical-device acceptance target.
 - Show a clear preview label explaining that results are predefined and the
@@ -35,7 +35,7 @@ with a calm, warm, readable interface, targeting Android first.
 ## Page flow
 
 Start/resume → photo and household profiles → photo confirmation → analysis
-progress → findings/checklist → finding detail → linked follow-up or photo review.
+progress → findings/checklist → finding detail → saved finding chat.
 
 Use a stack with clear titles and back navigation. Do not add bottom tabs.
 Home with assessment history is added by
@@ -49,8 +49,8 @@ latest-only navigation described below. Account flows remain a separate feature.
 | Photo confirmation | Inspect selected photo and profiles, replace photo, start assessment | Ready, invalid input, submission disabled or pending |
 | Analysis progress | Honest simulated processing indication; prevent duplicate submissions | Pending, failure with retained input and Retry, success |
 | Findings/checklist | Assessment photo, prioritised finding cards, completion progress, New assessment, secondary Delete assessment action | Findings present, no obvious visible hazards, partially complete, all items handled |
-| Finding detail | Severity, visible evidence, uncertainty, full recommendation, status and related evidence | Open, resolved, dismissed; follow-up available, skipped or answered; review available; pending or failed update |
-| Linked follow-up | Focused question or requested close-up, answer input appropriate to the request, submit, skip agent-initiated request | Text/photo input, permission denial, pending, failure with retry, successful revision |
+| Finding detail | Severity, visible evidence, uncertainty, full recommendation, status and related evidence | Open, resolved, dismissed; chat empty, pending, completed or failed; historical evidence viewable |
+| Finding chat | Saved text-only discussion, multiline composer and Send | Empty, loading, pending, failed with manual retry, complete, invalid input and limit |
 | User-requested review | New photo linked to the finding, simulated check, user decision after feedback | Photo input, pending, failure preserving existing finding, review feedback |
 
 Follow-up and review may share presentation components, but must preserve their
@@ -100,26 +100,21 @@ the domain definition. Do not expose “Infant” as the profile label in the UI
   resolved. Dismissal accepts an optional note; resolved and dismissed findings
   can be reopened.
 - Detail exposes the complete evidence, uncertainty, recommendation, and
-  available follow-up/review actions. Keep destructive actions secondary.
+  Chat about it for every status. Keep destructive actions secondary.
 - Completion summaries distinguish resolved from dismissed items. Handling all
   findings does not certify that the room is safe.
 
-## Follow-up and review behavior
+## Finding chat behavior
 
-- An agent-initiated follow-up belongs to one existing finding, with at most one
-  request per finding. The user may skip it and continue with uncertainty stated.
-- Text clarification accepts text. A visual check requires a new photo.
-- A successful submission revises that finding rather than creating a duplicate
-  finding or unrelated assessment.
-- “Ask AI to check” opens a user-requested photo review. In preview mode, its
-  feedback is explicitly simulated. Reviews remain available after the single
-  agent-initiated request has been used or skipped.
-- AI feedback never automatically resolves a finding. Absence of a concern from
-  a later photo does not establish resolution.
-- Preserve existing findings and statuses if a follow-up or review fails. Keep
-  the submitted text/photo and offer manual Retry within the same operation.
-- Prevent concurrent duplicate submissions. Retrying must not duplicate
-  findings or follow-up requests. No automatic retries are required.
+- See `.scratch/finding-chat/spec.md` for the current conversation contract.
+- Chat about it replaces the closer-look panel and Ask AI to check for every finding.
+- Opening chat reads history without generating an answer. Questions and replies are
+  advisory and never change findings, revisions, annotations or checklist status.
+- Preview uses local sample history and simulated replies, separate from account data.
+- Preserve local unsent drafts on back/restart, and preserve a new draft while
+  explicitly retrying a failed saved question. Do not duplicate messages on retry.
+- Keep completed historical evidence and photos viewable; stale evidence routes return
+  to the finding without offering new follow-up/photo-review submissions.
 
 ## Assessment lifecycle and persistence
 
@@ -144,7 +139,7 @@ the domain definition. Do not expose “Infant” as the profile label in the UI
 Provide a development-only scenario selector with repeatable fixtures for:
 
 1. Visible hazards with actionable findings and mixed severities.
-2. An uncertain finding with a focused follow-up and a revised result.
+2. An uncertain finding with text-only advisory chat and explicit uncertainty.
 3. No obvious visible hazards, with qualified language rather than a safety claim.
 4. Analysis failure followed by successful manual retry.
 5. Follow-up or review failure that preserves prior findings and submitted input.
@@ -234,9 +229,8 @@ demonstrated:
    and permission/capture fallbacks available.
 4. Finding cards and detail agree on status. Resolve, dismiss with optional note,
    and reopen work; checklist counts remain consistent with findings.
-5. Text and photo follow-ups update the linked finding. Skip preserves explicit
-   uncertainty, and user-requested reviews remain possible afterward. Simulated
-   review feedback never resolves an item automatically.
+5. Every finding opens its own saved text-only chat. Simulated replies never
+   revise evidence or change finding status. Removed evidence controls stay absent.
 6. Initial-analysis and linked-update failures offer manual retry with retained
    input. Linked failures preserve findings; repeat taps/retry create no duplicates.
 7. Restart/reload restores the latest assessment, its photos, and its user actions.

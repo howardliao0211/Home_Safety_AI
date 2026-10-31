@@ -19,6 +19,7 @@ class IntegrationProvider:
     def __init__(self):
         self.fail_initial = 0
         self.fail_revision = 0
+        self.fail_chat = 0
 
     def generate(self, *, system: str, context: dict, images: list, schema: type[BaseModel]):
         if schema.__name__ == "AssessmentResult":
@@ -56,6 +57,12 @@ class IntegrationProvider:
                     },
                 ],
             }
+        if schema.__name__ == "ChatAnswer":
+            if self.fail_chat:
+                self.fail_chat -= 1
+                raise ModelError("timeout")
+            prefix = "Our earlier discussion is included. " if context["previous_chat"] else ""
+            return {"answer": prefix + "Keep the route clear; only you decide its status."}
         if self.fail_revision:
             self.fail_revision -= 1
             raise ModelError("timeout")
@@ -107,6 +114,7 @@ def control(configuration: dict):
         accounts.recover()
     provider.fail_initial = int(configuration.get("fail_initial", 0))
     provider.fail_revision = int(configuration.get("fail_revision", 0))
+    provider.fail_chat = int(configuration.get("fail_chat", 0))
     return {"configured": True}
 
 

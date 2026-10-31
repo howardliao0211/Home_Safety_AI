@@ -12,8 +12,8 @@ Deliver a working phone-to-cloud demonstration within one week:
 - Return potential hazards with visible evidence, severity, recommendations,
   and explicit uncertainty.
 - Show findings as readable cards.
-- Request a targeted follow-up photo for a specific unresolved finding and use
-  it to revise that finding.
+- Ask text questions in a saved, finding-scoped conversation without changing
+  the finding, its evidence revisions, highlights, or checklist status.
 - Let the user resolve or dismiss findings and retain assessment/checklist state
   across app restarts.
 - Demonstrate a visible hazard, an uncertain case, and a room with no obvious
@@ -37,34 +37,38 @@ a category, severity, evidence, recommendation, uncertainty, and status;
 **Household profile**: Optional context identifying household members whose
 needs may affect the assessment, such as an older adult, child, infant, or pet.
 
-**Follow-up**: A focused question or targeted photo request linked to a specific
-finding, intended to clarify an uncertainty. Clarification questions can be
-answered with text; visual checks require a photo.
+**Finding chat**: A saved, text-only advisory conversation belonging to one finding.
+Each answer uses the original room photo, household context, current finding, earlier
+chat and completed historical discussion. Chat never changes findings or status.
+Only the authenticated backend reads/writes conversations in Firestore. Unsent drafts
+remain local and account-scoped. New follow-up/photo-review submissions are no longer
+offered in the frontend; saved historical evidence remains viewable.
+
+**Follow-up**: Historical focused clarification or targeted photo evidence linked to
+one finding. Legacy backend endpoints remain compatible, but new frontend guidance
+uses finding chat rather than follow-up or photo-review controls.
 
 **Checklist**: The prioritised actions recommended for an assessment, with exactly
 one completable checklist item per finding in the MVP.
 
 **Finding status**: `open`, `resolved`, or `dismissed`. The user is the final
-reviewer and decides when an item is resolved. The user may ask the agent to
-check an item, but the agent's review never automatically resolves it. Dismissal
+reviewer and decides when an item is resolved. Chat provides guidance but never automatically resolves an item. Dismissal
 means the finding is not relevant, with an optional user note. The user can
 reopen a resolved or dismissed finding.
 
 ## Assessment behavior
 
 - Assess: report potential hazards only where there is visible support.
-- Investigate: ask a focused question or request a targeted close-up when an
-  important concern cannot be determined from the current image. Allow at most
-  one agent-initiated follow-up request per finding and let the user skip it.
-  If uncertainty remains, state it explicitly and let the user continue.
+- Discuss: offer Chat about it on every finding, including resolved and dismissed
+  findings. Opening chat only loads history. The user sends text questions and can
+  manually retry failed replies. State remaining uncertainty explicitly.
 - Plan: recommend concise, prioritised, low-risk actions and professional help
   where appropriate.
 - Update: revisit the relevant finding when new evidence or a user action arrives.
   Absence from a later photo does not establish that a hazard is resolved.
-- Review: the user can request an agent check of an item before deciding whether
-  to mark it resolved by submitting a new photo linked to the finding.
-  User-requested reviews remain available after the single agent-initiated
-  follow-up request; the user always makes the final resolution decision.
+- Historical evidence: retain earlier completed follow-ups, photo reviews, content
+  revisions and highlights for viewing. Chat does not submit new photos or revise
+  this evidence. Only the user controls finding status.
 - A result with no obvious visible hazards is not a declaration that the room is safe.
 
 The assistant must avoid instructions for dangerous work, such as repairing
@@ -135,13 +139,15 @@ Keep API credentials and image payloads out of logs.
 On analysis failure, show the error and a Retry button in the app. Retain the
 submitted photo or text so a manual retry repeats the failed operation within
 the same assessment without duplicating findings. Preserve existing findings
-if a follow-up or review fails. Automatic retries are outside the current MVP
+if chat or legacy evidence analysis fails. Persist accepted chat questions before
+generation; recover interrupted replies after a five-minute lease and require an
+explicit manual retry. Context/storage limits retain readable history and drafts. Automatic retries are outside the current MVP
 scope. A failed analysis must not be presented as a successful assessment or
 a no-hazards result.
 
 ## Scope boundaries
 
-- Required: photo input, structured findings, linked follow-up, checklist state,
+- Required: photo input, structured findings, saved finding chat, checklist state,
   restart persistence, and phone-to-cloud connectivity.
 - Stretch goals, only if time remains after the required one-week scope:
   photo annotations, assessment comparisons, and illustrative image redesign.

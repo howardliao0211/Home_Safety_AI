@@ -6,8 +6,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import {
+  emptyConversation,
+  validateQuestion,
+  type Conversation,
+} from "@/domain/chat";
 import { previewService } from "@/api/preview-service";
-import { BackendClient } from "@/api/backend-client";
+import { ApiError, BackendClient } from "@/api/backend-client";
 import { apiConfig, apiEnabled } from "@/api/config";
 import { appendPhoto } from "@/api/photo-upload";
 import { newApiId } from "@/storage/device";
@@ -87,7 +92,17 @@ function usePreviewState(session: Session) {
       ...s,
       assessments: [
         ...s.assessments.filter((a) => a.id !== assessment.id),
-        assessment,
+        {
+          ...assessment,
+          findings: assessment.findings.map((f) => ({
+            ...f,
+            localChat:
+              s.assessments
+                .find((a) => a.id === assessment.id)
+                ?.findings.find((old) => old.id === f.id)?.localChat ??
+              f.localChat,
+          })),
+        },
       ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     }));
     if (sessionActive.current) {
@@ -596,6 +611,176 @@ function usePreviewState(session: Session) {
           }));
         }
       }),
+    saveChatDraft: async (aid: string, fid: string, draft: string) => {
+      await editFinding(aid, fid, (f) => ({
+        ...f,
+        localChat: { ...f.localChat, draft },
+      }));
+    },
+    loadChat: async (aid: string, fid: string): Promise<Conversation> => {
+      const finding = assessmentById(aid).findings.find((f) => f.id === fid);
+      if (!finding) throw new Error("This finding is no longer available.");
+      if (apiEnabled) {
+        const conversation = await (await backend()).chat(aid, fid);
+        const outbound = finding.localChat?.outbound;
+        if (
+          outbound &&
+          conversation.turns.some(
+            (t) => t.id === outbound.id && t.question === outbound.question,
+          )
+        ) {
+          await editFinding(aid, fid, (f) => ({
+            ...f,
+            localChat: {
+              ...f.localChat,
+              outbound: undefined,
+              draft:
+                f.localChat?.draft === outbound.question
+                  ? ""
+                  : (f.localChat?.draft ?? ""),
+            },
+          }));
+        }
+        return conversation;
+      }
+      return finding.localChat?.preview ?? emptyConversation();
+    },
+    acceptChat: async (
+      aid: string,
+      fid: string,
+    ): Promise<{ conversation: Conversation; turnId: string }> => {
+      const f = assessmentById(aid).findings.find((f) => f.id === fid)!;
+      const local = f.localChat ?? { draft: "" };
+      const outbound = local.outbound ?? {
+        id: newApiId(),
+        question: local.draft,
+      };
+      const invalid = validateQuestion(outbound.question);
+      if (invalid) throw new Error(invalid);
+      // Commit identity before the request. An ambiguous transport failure reuses it.
+      await editFinding(aid, fid, (f) => ({
+        ...f,
+        localChat: {
+          ...f.localChat,
+          draft: f.localChat?.draft ?? "",
+          outbound,
+        },
+      }));
+      let conversation: Conversation;
+      if (apiEnabled) {
+        try {
+          conversation = await (await backend()).acceptChat(aid, fid, outbound);
+        } catch (e) {
+          if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
+            await editFinding(aid, fid, (f) => ({
+              ...f,
+              localChat: {
+                ...f.localChat,
+                draft: f.localChat?.draft ?? "",
+                outbound: undefined,
+              },
+            }));
+          }
+          throw e;
+        }
+      } else {
+        conversation = local.preview ?? emptyConversation();
+        if (!conversation.turns.some((t) => t.id === outbound.id)) {
+          if (conversation.turns.some((t) => t.status !== "complete"))
+            throw new Error("Retry the saved question first.");
+          if (conversation.turns.length >= 12)
+            throw new Error("This finding has reached its 12-question limit.");
+          conversation = {
+            ...conversation,
+            turns: [
+              ...conversation.turns,
+              {
+                id: outbound.id,
+                question: outbound.question,
+                answer: null,
+                status: "ready",
+                error: null,
+                created_at: new Date().toISOString(),
+                finished_at: null,
+              },
+            ],
+          };
+        }
+      }
+      await editFinding(aid, fid, (f) => ({
+        ...f,
+        localChat: {
+          ...f.localChat,
+          outbound: undefined,
+          draft:
+            f.localChat?.draft === outbound.question
+              ? ""
+              : (f.localChat?.draft ?? ""),
+          ...(!apiEnabled ? { preview: conversation } : {}),
+        },
+      }));
+      return { conversation, turnId: outbound.id };
+    },
+    generateChat: async (
+      aid: string,
+      fid: string,
+      tid: string,
+    ): Promise<Conversation> => {
+      if (apiEnabled)
+        return (await backend()).generateChat(aid, fid, tid, newApiId());
+      const a = assessmentById(aid);
+      const f = a.findings.find((f) => f.id === fid)!;
+      const before = f.localChat?.preview ?? emptyConversation();
+      const turn = before.turns.find((t) => t.id === tid);
+      if (!turn) throw new Error("This saved question is no longer available.");
+      if (turn.status === "complete" || turn.status === "running")
+        return before;
+      const isRetry = turn.status === "failed";
+      const save = async (conversation: Conversation) => {
+        await editFinding(aid, fid, (f) => ({
+          ...f,
+          localChat: {
+            ...f.localChat,
+            draft: f.localChat?.draft ?? "",
+            preview: conversation,
+          },
+        }));
+        return conversation;
+      };
+      await save({
+        ...before,
+        turns: before.turns.map((t) =>
+          t.id === tid ? { ...t, status: "running", error: null } : t,
+        ),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      if (!sessionActive.current)
+        throw new Error("The account session has changed.");
+      const failed = a.scenario === "update-error" && !isRetry;
+      const conversation: Conversation = {
+        ...before,
+        turns: before.turns.map((t) =>
+          t.id !== tid
+            ? t
+            : {
+                ...t,
+                status: failed ? "failed" : "complete",
+                error: failed
+                  ? "The simulated reply could not finish. Retry when ready."
+                  : null,
+                answer: failed
+                  ? null
+                  : `Simulated guidance about “${f.title}”: ${f.recommendation} ${before.turns.some((t) => t.status === "complete") ? "As in our earlier discussion, " : ""}${f.uncertainty} You decide whether to change this finding’s status.`,
+                finished_at: failed ? null : new Date().toISOString(),
+              },
+        ),
+        blocked_reason:
+          before.turns.length >= 12
+            ? "This finding has reached its 12-question limit. Your saved discussion remains available."
+            : null,
+      };
+      return save(conversation);
+    },
     annotationClient: backend,
     loadAssessment: (id: string) =>
       act(async () => {

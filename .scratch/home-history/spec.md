@@ -120,8 +120,9 @@ move entries to the top. Use cursor pagination (initial page of 20 records and
 Load more) without duplicates. Exclude records undergoing deletion.
 
 Opening a completed entry loads that assessment and enables the same existing
-actions: review findings/evidence, resolve, dismiss, reopen, and submit follow-up
-or user-review evidence. Preserve existing deletion confirmation and retryable
+actions: view saved findings/evidence, resolve, dismiss, reopen, and open the
+saved text-only finding chat. New follow-up/photo-review submissions are replaced
+by chat; see `.scratch/finding-chat/spec.md`. Preserve existing deletion confirmation and retryable
 backend deletion semantics. Update/remove the corresponding Home row after changes.
 
 Opening an unfinished saved assessment uses its existing progress/recovery flow.

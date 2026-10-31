@@ -27,7 +27,7 @@ async function sampleAssessment(page: Page, scenario?: string) {
   ).toBeVisible();
 }
 
-test("household journey: profiles, checklist actions, dismissal, persistence, text follow-up and photo review", async ({
+test("household journey: profiles, checklist actions, dismissal, persistence and finding chat", async ({
   page,
 }) => {
   const errors: string[] = [];
@@ -70,30 +70,17 @@ test("household journey: profiles, checklist actions, dismissal, persistence, te
   await page
     .getByRole("button", { name: "View Give the walkway more room" })
     .click();
-  await page.getByRole("button", { name: "Answer a question" }).click();
   await page
-    .getByRole("textbox", { name: "Your answer", exact: true })
-    .fill("Yes, we walk through here at night.");
-  await page
-    .getByRole("button", { name: "Submit follow-up", exact: true })
+    .getByRole("button", { name: "Chat about it", exact: true })
     .click();
-  await expect(
-    page.getByText("Follow-up received.", { exact: false }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("Yes, we walk through here at night.", { exact: true }),
-  ).toBeVisible();
   await page
-    .getByRole("button", { name: "Ask AI to check", exact: true })
-    .click();
-  await page.getByRole("button", { name: "Use quiet room sample" }).click();
+    .getByRole("textbox", { name: "Your question", exact: true })
+    .fill("How can I reduce trips at night?");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByText(/Simulated guidance about/)).toBeVisible();
   await page
-    .getByRole("button", { name: "Request sample photo review" })
+    .getByRole("button", { name: "Back to finding", exact: true })
     .click();
-  await expect(
-    page.getByRole("button", { name: "Return to finding" }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Return to finding" }).click();
   await expect(
     page.getByRole("button", { name: "Mark resolved", exact: true }),
   ).toBeVisible();
@@ -123,51 +110,39 @@ test("analysis failure keeps input and succeeds with manual retry", async ({
   await expect(page.getByRole("button", { name: /^View / })).toHaveCount(3);
 });
 
-test("failed follow-up retains photo and retries without resolving or duplicating the finding", async ({
+test("a finding without a follow-up keeps chat available after dismissal", async ({
   page,
 }) => {
-  await sampleAssessment(page, "Follow-up / review retry");
+  await sampleAssessment(page);
   await page
-    .getByRole("button", { name: "View Check the tall cabinet" })
+    .getByRole("button", {
+      name: "View Put small items out of reach",
+      exact: true,
+    })
     .click();
-  await page.getByRole("button", { name: "Add a close-up photo" }).click();
-  await page.getByRole("button", { name: "Use quiet room sample" }).click();
-  await page.getByRole("button", { name: "Submit follow-up" }).click();
-  await expect(page.getByRole("button", { name: "Retry check" })).toBeVisible();
-  await page.reload();
-  await expect(page.getByRole("button", { name: "Retry check" })).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Use quiet room sample" }),
-  ).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Retry check" }).click();
-  await expect(
-    page.getByText("Follow-up received.", { exact: false }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Mark resolved", exact: true }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Back to checklist" }).click();
-  await expect(page.getByText("0 of 3 handled", { exact: true })).toBeVisible();
-});
-
-test("skipping an uncertain finding still permits a user-requested review", async ({
-  page,
-}) => {
-  await sampleAssessment(page, "A closer look");
   await page
-    .getByRole("button", { name: "View Check the tall cabinet" })
+    .getByRole("button", { name: "Dismiss as not relevant", exact: true })
     .click();
-  await page.getByRole("button", { name: "Skip for now" }).click();
-  await expect(page.getByText(/You skipped this request/)).toBeVisible();
-  await page.getByRole("button", { name: "Ask AI to check" }).click();
-  await page.getByRole("button", { name: "Use living room sample" }).click();
   await page
-    .getByRole("button", { name: "Request sample photo review" })
+    .getByRole("button", { name: "Save dismissal", exact: true })
     .click();
-  await page.getByRole("button", { name: "Return to finding" }).click();
-  await expect(page.getByText(/You skipped this request/)).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Mark resolved", exact: true }),
+    page.getByRole("button", { name: "Skip for now", exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Chat about it", exact: true })
+    .click();
+  await page
+    .getByRole("textbox", { name: "Your question", exact: true })
+    .fill("What if my household changes?");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByText(/Simulated guidance about/)).toBeVisible();
+  await page
+    .getByRole("button", { name: "Back to finding", exact: true })
+    .click();
+  await expect(page.getByText(/Dismissed by you/)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Reopen finding", exact: true }),
   ).toBeVisible();
 });
 
@@ -307,7 +282,9 @@ test("storage write failure never shows a status as saved", async ({
     })
     .click();
   await expect(
-    page.getByText("Preview storage is full", { exact: true }),
+    page
+      .getByText("Preview storage is full", { exact: true })
+      .filter({ visible: true }),
   ).toBeVisible();
   await expect(page.getByText("0 of 3 handled", { exact: true })).toBeVisible();
   await page.evaluate(() => {
@@ -338,28 +315,6 @@ test("interrupted analysis resumes with manual retry rather than claiming succes
   await expect(page.getByText(/The preview was interrupted/)).toBeVisible();
   await page.getByRole("button", { name: "Retry analysis" }).click();
   await expect(page.getByText("0 of 3 handled", { exact: true })).toBeVisible();
-});
-
-test("back navigation saves a text clarification for later submission", async ({
-  page,
-}) => {
-  await sampleAssessment(page);
-  await page
-    .getByRole("button", { name: "View Give the walkway more room" })
-    .click();
-  await page.getByRole("button", { name: "Answer a question" }).click();
-  await page
-    .getByRole("textbox", { name: "Your answer", exact: true })
-    .fill("We use this walkway after dark.");
-  await page.getByRole("button", { name: "Back to finding" }).click();
-  await page.getByRole("button", { name: "Continue follow-up" }).click();
-  await expect(
-    page.getByRole("textbox", { name: "Your answer", exact: true }),
-  ).toHaveValue("We use this walkway after dark.");
-  await page.reload();
-  await expect(
-    page.getByRole("textbox", { name: "Your answer", exact: true }),
-  ).toHaveValue("We use this walkway after dark.");
 });
 
 test("handling every item remains qualified and reopening restores an open item", async ({

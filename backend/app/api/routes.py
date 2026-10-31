@@ -6,9 +6,18 @@ from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Resp
 from pydantic import TypeAdapter, ValidationError
 
 from app.annotations.service import public_annotation
+from app.assessments.chat import ChatService
 from app.assessments.service import AssessmentService
 from app.errors import AppError
-from app.models.schemas import AnnotationRequest, Assessment, FeedbackRequest, FindingPatch, Profile
+from app.models.schemas import (
+    AnnotationRequest,
+    Assessment,
+    ChatGeneration,
+    ChatRequest,
+    FeedbackRequest,
+    FindingPatch,
+    Profile,
+)
 from app.storage.photos import MAX_UPLOAD_BYTES, prepare_photo
 
 
@@ -50,6 +59,8 @@ def public(assessment: Assessment) -> dict:
         },
     )
     for finding in result["findings"]:
+        finding.pop("chat", None)
+        finding.pop("chat_blocked", None)
         jobs = [j for j in assessment.annotations if j.finding_id == finding["id"]]
         finding["annotations"] = [public_annotation(j) for j in jobs]
         finding["annotation"] = next(
@@ -270,3 +281,38 @@ def delete_account(request: Request, claims: Annotated[dict, Depends(identity)])
 def deletion_status(request: Request, x_deletion_receipt: Annotated[str, Header(max_length=200)]):
     # Receipt is carried in a header, never in access-logged URLs.
     return request.app.state.accounts.accounts.status(x_deletion_receipt)
+
+
+CHAT = "/v1/assessments/{assessment_id}/findings/{finding_id}/chat"
+
+
+@router.get(CHAT)
+def get_chat(assessment_id: UUID, finding_id: UUID, svc: Service, device: Owner):
+    return ChatService(svc).get(device, str(assessment_id), str(finding_id))
+
+
+@router.post(CHAT + "/turns", status_code=201)
+def accept_chat(
+    assessment_id: UUID, finding_id: UUID, body: ChatRequest, svc: Service, device: Owner
+):
+    return ChatService(svc).accept(device, str(assessment_id), str(finding_id), body)
+
+
+@router.post(CHAT + "/turns/{turn_id}/generate")
+def generate_chat(
+    assessment_id: UUID,
+    finding_id: UUID,
+    turn_id: UUID,
+    body: ChatGeneration,
+    request: Request,
+    svc: Service,
+    device: Owner,
+):
+    return ChatService(svc).generate(
+        device,
+        str(assessment_id),
+        str(finding_id),
+        str(turn_id),
+        body.attempt_id,
+        request.state.request_id,
+    )
