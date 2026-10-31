@@ -28,12 +28,14 @@ import {
   isIncomplete,
   MAX_CHAT_QUESTION,
   mergeConversation,
+  observeJob,
   validateQuestion,
   type Conversation,
 } from "@/domain/chat";
 import { ApiError } from "@/api/backend-client";
 
-const POLL_MS = 1000;
+// With ~200 ms backend publishing, keeps provider-to-screen delivery near 500 ms.
+const POLL_MS = 250;
 
 export default function ChatRoute() {
   const { assessmentId, findingId } = useLocalSearchParams<{
@@ -89,36 +91,44 @@ function Chat({ aid, fid }: { aid: string; fid: string }) {
     if (e instanceof ApiError && (e.status === 404 || e.code === "deleting"))
       setUnavailable(true);
   }
-  const load = useCallback(async () => {
-    if (!mounted.current) return;
-    setLoading(true);
-    setLoadError("");
-    try {
-      const outbound = latest.current.state.assessments
-        .find((a) => a.id === aid)
-        ?.findings.find((f) => f.id === fid)?.localChat?.outbound;
-      const result = await latest.current.loadChat(aid, fid);
-      if (mounted.current) {
-        setConversation((current) => mergeConversation(current, result));
-        if (
-          outbound &&
-          result.turns.some((t) => t.id === outbound.id) &&
-          draftRef.current === outbound.question
-        ) {
-          draftRef.current = "";
-          setDraft("");
+  // `observing`: a background progress read. It neither toggles loading nor
+  // clears a shown error before succeeding, so streaming text never flickers.
+  const load = useCallback(
+    async (observing = false) => {
+      if (!mounted.current) return;
+      if (!observing) {
+        setLoading(true);
+        setLoadError("");
+      }
+      try {
+        const outbound = latest.current.state.assessments
+          .find((a) => a.id === aid)
+          ?.findings.find((f) => f.id === fid)?.localChat?.outbound;
+        const result = await latest.current.loadChat(aid, fid);
+        if (mounted.current) {
+          if (observing) setLoadError("");
+          setConversation((current) => mergeConversation(current, result));
+          if (
+            outbound &&
+            result.turns.some((t) => t.id === outbound.id) &&
+            draftRef.current === outbound.question
+          ) {
+            draftRef.current = "";
+            setDraft("");
+          }
         }
+        return result;
+      } catch (e) {
+        if (mounted.current) {
+          setLoadError(message(e));
+          checkUnavailable(e);
+        }
+      } finally {
+        if (mounted.current && !observing) setLoading(false);
       }
-      return result;
-    } catch (e) {
-      if (mounted.current) {
-        setLoadError(message(e));
-        checkUnavailable(e);
-      }
-    } finally {
-      if (mounted.current) setLoading(false);
-    }
-  }, [aid, fid]);
+    },
+    [aid, fid],
+  );
   useFocusEffect(
     useCallback(() => {
       void load();
@@ -131,21 +141,19 @@ function Chat({ aid, fid }: { aid: string; fid: string }) {
   useFocusEffect(
     useCallback(() => {
       if (!active) return;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      let stopped = false;
-      const tick = async () => {
-        if (stopped || AppState.currentState !== "active") return;
-        await load();
-        if (!stopped) timer = setTimeout(() => void tick(), POLL_MS);
-      };
-      timer = setTimeout(() => void tick(), POLL_MS);
+      let stop =
+        AppState.currentState === "active"
+          ? observeJob(() => load(true), POLL_MS)
+          : undefined;
       const listener = AppState.addEventListener("change", (state) => {
-        clearTimeout(timer);
-        if (state === "active") void tick();
+        stop?.();
+        stop =
+          state === "active"
+            ? observeJob(() => load(true), POLL_MS)
+            : undefined;
       });
       return () => {
-        stopped = true;
-        clearTimeout(timer);
+        stop?.();
         listener.remove();
       };
     }, [active, load]),
@@ -315,7 +323,7 @@ function Chat({ aid, fid }: { aid: string; fid: string }) {
               {t.status === "complete" && t.answer && (
                 <View style={{ padding: 16, gap: 8 }}>
                   <Copy kind="eyebrow">ASSISTANT</Copy>
-                  <Copy>{t.answer}</Copy>
+                  <Copy testID="chat-assistant-message">{t.answer}</Copy>
                 </View>
               )}
               {isActive(t) && (
@@ -331,7 +339,9 @@ function Chat({ aid, fid }: { aid: string; fid: string }) {
                       {t.status === "queued" ? "Waiting to start…" : "Writing…"}
                     </Copy>
                   </View>
-                  {!!t.partial && <Copy>{t.partial}</Copy>}
+                  {!!t.partial && (
+                    <Copy testID="chat-assistant-message">{t.partial}</Copy>
+                  )}
                 </View>
               )}
               {isIncomplete(t) && (

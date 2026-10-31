@@ -628,3 +628,81 @@ test("eager finding highlights are only fetched, align inline, hide and report i
   ).toBeVisible();
   expect(posts).toBe(1);
 });
+
+test("connected streaming: provider fragments render progressively within 500 ms of backend receipt", async ({
+  page,
+  request,
+}, testInfo) => {
+  // Controlled provider: 10 fragments 300 ms apart over loopback (no shaping).
+  await request.post(backend + "/__test/control", {
+    data: { chat_delay: 0.3 },
+  });
+  await start(page);
+  await page.getByRole("button", { name: "Use living room sample" }).click();
+  await submit(page);
+  await expect(page.getByText("0 of 2 handled", { exact: true })).toBeVisible();
+  await page
+    .getByRole("button", { name: "View Keep the walkway clear", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Chat about it", exact: true })
+    .click();
+  await expect(
+    page.getByRole("textbox", { name: "Your question", exact: true }),
+  ).toBeVisible();
+  // Record every rendered frame's assistant text with its wall-clock time.
+  await page.evaluate(() => {
+    const frames: { at: number; text: string }[] = [];
+    (window as unknown as { __frames: typeof frames }).__frames = frames;
+    const sample = () => {
+      const text =
+        document.querySelector('[data-testid="chat-assistant-message"]')
+          ?.textContent ?? "";
+      if (text !== (frames.at(-1)?.text ?? ""))
+        frames.push({ at: Date.now(), text });
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  await page
+    .getByRole("textbox", { name: "Your question", exact: true })
+    .fill("What should I do first?");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByText("Writing…", { exact: true })).toBeVisible();
+  const final = "Keep the route clear; only you decide its status.";
+  await expect(page.getByTestId("chat-assistant-message")).toHaveText(final);
+  await expect(page.getByText("Writing…", { exact: true })).toHaveCount(0);
+  const frames: { at: number; text: string }[] = await page.evaluate(
+    () => (window as unknown as { __frames: never }).__frames,
+  );
+  const fragments: { at: number; text: string }[] = await (
+    await request.get(backend + "/__test/fragments")
+  ).json();
+  expect(fragments).toHaveLength(final.split(" ").length);
+  // Text only grows, appears once and never regresses.
+  for (let i = 1; i < frames.length; i++)
+    expect(frames[i].text.startsWith(frames[i - 1].text.trimEnd())).toBe(true);
+  expect(frames.at(-1)!.text).toBe(final);
+  // Several distinct partial updates before completion.
+  expect(frames.filter((f) => f.text !== final).length).toBeGreaterThanOrEqual(
+    3,
+  );
+  const delays = fragments.map((fragment) => {
+    const seen = frames.find((f) => f.text.startsWith(fragment.text.trimEnd()));
+    expect(seen, fragment.text).toBeTruthy();
+    return Math.round(seen!.at - fragment.at);
+  });
+  const sorted = [...delays].sort((a, b) => a - b);
+  const timing = {
+    environment: `${testInfo.project.name || "chromium"} web, local FastAPI + Firestore emulator over loopback`,
+    delays_ms: delays,
+    median_ms: sorted[Math.floor(sorted.length / 2)],
+    max_ms: sorted.at(-1),
+  };
+  console.log("chat delivery timing", JSON.stringify(timing));
+  await testInfo.attach("chat-delivery-timing", {
+    body: JSON.stringify(timing, null, 2),
+    contentType: "application/json",
+  });
+  expect(timing.max_ms).toBeLessThanOrEqual(500);
+});

@@ -61,3 +61,34 @@ export function mergeConversation(
     }),
   };
 }
+/**
+ * Observe an active job: start a read every `intervalMs`, measured from the
+ * previous read's start, without overlapping reads. A failed read (for example
+ * a temporary connection loss) only skips that observation. Reads never start
+ * generation. Returns a function that stops observing.
+ */
+export function observeJob(
+  read: () => Promise<unknown>,
+  intervalMs: number,
+): () => void {
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const tick = async () => {
+    if (stopped) return;
+    const started = Date.now();
+    try {
+      await read();
+    } catch {
+      // Keep the shown text; the next observation retries.
+    }
+    if (stopped) return;
+    const wait = intervalMs - (Date.now() - started);
+    if (wait <= 0) void tick();
+    else timer = setTimeout(() => void tick(), wait);
+  };
+  void tick();
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+  };
+}

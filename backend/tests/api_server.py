@@ -24,6 +24,7 @@ class IntegrationProvider:
         self.fail_initial = 0
         self.fail_revision = 0
         self.fail_chat = 0
+        self.fragments = []
 
     def generate(self, *, system: str, context: dict, images: list, schema: type[BaseModel]):
         if schema.__name__ == "AssessmentResult":
@@ -82,8 +83,13 @@ class IntegrationProvider:
         failing = self.fail_chat > 0
         if failing:
             self.fail_chat -= 1
+        self.fragments = []
+        text = ""
         for index, word in enumerate(words):
             time.sleep(self.chat_delay)
+            text += word + ("" if index == len(words) - 1 else " ")
+            # Wall-clock receipt, compared with browser render times on this host.
+            self.fragments.append({"at": time.time() * 1000, "text": text})
             yield word + ("" if index == len(words) - 1 else " ")
             if failing and index == 3:
                 raise ModelError("transport")
@@ -114,6 +120,11 @@ app = create_app(settings, provider=provider)
 @app.get("/__test/ready")
 def ready():
     return {"fixture": True}
+
+
+@app.get("/__test/fragments")
+def fragments():
+    return provider.fragments
 
 
 @app.post("/__test/control")

@@ -167,11 +167,12 @@ export class BackendClient {
   private async request(
     path: string,
     init: RequestInit = {},
+    timeoutMs = 310_000,
   ): Promise<Response> {
     this.assertActive();
     const abort = new AbortController();
     this.pending.add(abort);
-    const timer = setTimeout(() => abort.abort(), 310_000);
+    const timer = setTimeout(() => abort.abort(), timeoutMs);
     try {
       const headers = new Headers(init.headers);
       const token = await this.config.getToken();
@@ -404,7 +405,10 @@ export class BackendClient {
     assessmentId: string,
     findingId: string,
   ): Promise<import("../domain/chat").Conversation> {
-    return (await this.request(this.chatPath(assessmentId, findingId))).json();
+    // Observation read: a short timeout lets polling resume after a lost connection.
+    return (
+      await this.request(this.chatPath(assessmentId, findingId), {}, 10_000)
+    ).json();
   }
   async acceptChat(
     assessmentId: string,

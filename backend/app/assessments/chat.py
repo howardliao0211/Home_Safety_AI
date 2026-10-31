@@ -9,6 +9,7 @@ restarts a model stream. Pure transactional transitions, no model retries.
 
 import json
 import logging
+import threading
 import time
 from datetime import timedelta
 from uuid import uuid4
@@ -33,7 +34,11 @@ QUEUE_SECONDS = 600  # A queued attempt not started by then fails; manual retry 
 STREAM_SECONDS = 180  # Overall provider streaming budget for one attempt.
 EXECUTION_SECONDS = 210  # Claim lease: stream budget plus persistence margin.
 TASK_DEADLINE_SECONDS = 240  # Cloud Tasks dispatch deadline, below Cloud Run's 300.
-PUBLISH_SECONDS = 0.75  # Partial text is persisted at most this often.
+# Partial text is persisted at most this often, and no later than this after the
+# provider sends it (a background publisher flushes text even while the provider
+# is quiet). With ~250 ms client polling this keeps provider-to-screen delivery
+# near 500 ms while bounding document rewrites to a few per second per reply.
+PUBLISH_SECONDS = 0.2
 # Request budget, not answer length: Muse counts reasoning tokens here (a 700-token
 # budget was exhausted by reasoning before any text in a live check). The answer is
 # bounded by MAX_ANSWER and the prompt; longer text fails as `too_long`.
@@ -410,18 +415,15 @@ class ChatService:
     def _stream(self, owner, assessment, finding, turn, execution, request_id):
         aid, fid, tid = assessment.id, finding.id, turn.id
         started = time.monotonic()
-        text, published = "", ""
-        last_publish = 0.0
+        text = ""
 
-        def publish():
-            nonlocal published, last_publish
-
+        def write(snapshot):
             def change(a, f, t):
-                t.partial = text
+                t.partial = snapshot
 
             self._fence(owner, aid, fid, tid, execution, change)
-            published, last_publish = text, time.monotonic()
 
+        publisher = Publisher(write, self.publish_seconds)
         try:
             image = self.assessments._image(
                 owner, assessment, assessment.photo, "Original room photo"
@@ -439,10 +441,8 @@ class ChatService:
                     raise ModelError("too_long")
                 if time.monotonic() - started > STREAM_SECONDS:
                     raise ModelError("timeout")
-                if text != published and (
-                    not published or time.monotonic() - last_publish >= self.publish_seconds
-                ):
-                    publish()
+                publisher.offer(text)
+            publisher.close()
             answer = text.strip()
             if not answer:
                 raise ModelError("invalid_response")
@@ -454,6 +454,7 @@ class ChatService:
 
             self._fence(owner, aid, fid, tid, execution, complete)
         except Exception as exc:
+            publisher.close()
             if isinstance(exc, AppError) and exc.code in {
                 "not_found",
                 "deleting",
@@ -492,3 +493,59 @@ class ChatService:
                 self._fence(owner, aid, fid, tid, execution, fail)
             except AppError:
                 pass
+
+
+class Publisher:
+    """Persist the latest partial text off the provider-reading thread.
+
+    Writes start as soon as new text exists, at most once per `interval`, so a
+    quiet provider never strands received text and slow storage never stalls the
+    stream. Snapshots only grow; a write failure (for example `superseded`) is
+    re-raised to the stream on its next fragment.
+    """
+
+    def __init__(self, write, interval):
+        self.write, self.interval = write, interval
+        self.condition = threading.Condition()
+        self.latest = self.published = ""
+        self.closed, self.error = False, None
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def offer(self, text):
+        with self.condition:
+            if self.error:
+                raise self.error
+            self.latest = text
+            self.condition.notify()
+
+    def close(self):
+        """Stop without further writes; the terminal write follows this."""
+        with self.condition:
+            self.closed = True
+            self.condition.notify()
+        if self.thread is not threading.current_thread():
+            self.thread.join()
+
+    def _run(self):
+        last = None
+        while True:
+            with self.condition:
+                while not self.closed and self.latest == self.published:
+                    self.condition.wait()
+                if last is not None:
+                    due = last + self.interval
+                    while not self.closed and time.monotonic() < due:
+                        self.condition.wait(due - time.monotonic())
+                if self.closed:
+                    return
+                snapshot = self.latest
+            try:
+                self.write(snapshot)
+            except Exception as exc:
+                with self.condition:
+                    self.error = exc
+                return
+            last = time.monotonic()
+            with self.condition:
+                self.published = snapshot

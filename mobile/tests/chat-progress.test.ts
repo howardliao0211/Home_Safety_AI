@@ -5,6 +5,7 @@ import {
   isActive,
   isIncomplete,
   mergeConversation,
+  observeJob,
   type ChatTurn,
   type Conversation,
 } from "../src/domain/chat";
@@ -68,4 +69,35 @@ test("active and incomplete states are explicit", () => {
     isIncomplete(turn(1, { status: "complete", answer: "Done" })),
     false,
   );
+});
+
+test("observation reads start on a fixed cadence, never overlap and survive failed reads", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const starts: number[] = [];
+  const latency = [100, 400, 50, 50];
+  let call = 0;
+  const read = () => {
+    starts.push(Date.now());
+    const index = call++;
+    return new Promise<void>((resolve, reject) =>
+      setTimeout(
+        () => (index === 2 ? reject(new Error("offline")) : resolve()),
+        latency[index] ?? 50,
+      ),
+    );
+  };
+  const stop = observeJob(read, 250);
+  const advance = async (ms: number) => {
+    for (let i = 0; i < ms; i++) {
+      t.mock.timers.tick(1);
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+  };
+  await advance(1100);
+  stop();
+  await advance(1000);
+  // 0 → 250 on cadence; the 400 ms read delays the next start to 650 with no
+  // overlap; a failed read (connection loss) keeps observing; stop ends it.
+  assert.deepEqual(starts, [0, 250, 650, 900]);
 });

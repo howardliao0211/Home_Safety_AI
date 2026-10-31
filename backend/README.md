@@ -315,9 +315,12 @@ ID) and dispatch intent (`chat_dispatch_pending`), then returns without waiting 
 the model. A Cloud Tasks delivery (`POST /internal/chat/work`, service OIDC, the
 same queue as highlights) claims the attempt once with an execution ID and lease;
 duplicate or late deliveries are no-ops. The worker assembles saved context and
-the original photo, streams plain answer text from the provider and persists the
-accumulated `partial` at most every 0.75 seconds (first fragment immediately),
-incrementing `version` on every change. Completion requires the provider's
+the original photo, streams plain answer text from the provider and a background
+publisher persists the accumulated `partial` at most every 0.2 seconds (first
+fragment immediately; text received before a provider pause is still flushed
+within 0.2 seconds), incrementing `version` on every change. The app polls an
+active job every 250 ms (fixed cadence, no overlapping reads, 10-second read
+timeout) for roughly 500 ms provider-to-screen delivery. Completion requires the provider's
 explicit success event, nonblank text and at most 3,000 characters.
 
 Deadlines, coordinated with Cloud Run's 300-second request limit:

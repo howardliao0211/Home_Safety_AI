@@ -1,4 +1,5 @@
 import threading
+import time
 from datetime import timedelta
 from uuid import uuid4
 
@@ -88,7 +89,9 @@ def test_partial_text_is_published_before_the_terminal_event(rig, assessed):
     worker = threading.Thread(target=run, args=(client,))
     worker.start()
     assert first_out.wait(5)
-    during = turns(client, path)[0]
+    deadline = time.monotonic() + 0.5
+    while not (during := turns(client, path)[0])["partial"] and time.monotonic() < deadline:
+        time.sleep(0.01)
     assert during["status"] == "running" and during["partial"] == "Keep the "
     assert during["answer"] is None
     release.set()
@@ -97,6 +100,32 @@ def test_partial_text_is_published_before_the_terminal_event(rig, assessed):
     assert after["status"] == "complete" and after["answer"] == "Keep the route clear."
     assert after["version"] > during["version"]
     assert after["id"] == tid
+
+
+def test_text_received_before_a_provider_pause_is_published_promptly(rig, assessed):
+    client, _, _, provider = rig
+    path = chat_path(assessed)
+    send(client, path)
+    paused, release = threading.Event(), threading.Event()
+
+    def pause():
+        paused.set()
+        assert release.wait(5)
+
+    # The provider goes quiet after three quick fragments; none may wait for a fourth.
+    provider.results.append(Script(["Keep ", "the ", "route ", "clear."], gates={3: pause}))
+    worker = threading.Thread(target=run, args=(client,))
+    worker.start()
+    try:
+        assert paused.wait(5)
+        received = time.monotonic()
+        while turns(client, path)[0]["partial"] != "Keep the route ":
+            assert time.monotonic() - received < 0.5, turns(client, path)[0]["partial"]
+            time.sleep(0.01)
+    finally:
+        release.set()
+        worker.join(5)
+    assert turns(client, path)[0]["answer"] == "Keep the route clear."
 
 
 def test_partials_are_batched_on_a_bounded_cadence(rig, assessed):
