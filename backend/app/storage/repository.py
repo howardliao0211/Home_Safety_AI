@@ -31,6 +31,7 @@ class AssessmentRepository(Protocol):
 
     def annotation_pending(self) -> list[Assessment]: ...
     def chat_pending(self) -> list[Assessment]: ...
+    def room_concept_pending(self) -> list[Assessment]: ...
     def close(self) -> None: ...
 
 
@@ -150,11 +151,21 @@ class FirestoreRepository:
                     Assessment.model_validate(snapshot.to_dict()) if snapshot.exists else None
                 )
                 states = {j.id: j.state for j in previous.annotations} if previous else {}
+                room_state = (
+                    previous.room_concept.state if previous and previous.room_concept else None
+                )
                 updated = change(previous)
                 if updated is None:
                     return None
                 check_size(updated)
                 payload = updated.model_dump(mode="python")
+                room_publishing = (
+                    updated.room_concept
+                    and updated.room_concept.state == "ready"
+                    and room_state != "ready"
+                )
+                if room_publishing:
+                    payload["room_concept_commit"] = firestore.SERVER_TIMESTAMP
                 publishing = [
                     j.id
                     for j in updated.annotations
@@ -179,6 +190,9 @@ class FirestoreRepository:
                 committed = True
                 for annotation_id in publishing:
                     updated.annotation_commits[annotation_id] = result.update_time
+                if room_publishing:
+                    updated.room_concept_commit = result.update_time
+                    updated.validate_annotation_commits()
                 return updated
             except (Aborted, FailedPrecondition):
                 left()
@@ -210,6 +224,16 @@ class FirestoreRepository:
         # One-field collection-group index, provisioned in Terraform.
         query = self.client.collection_group("assessments").where(
             filter=firestore.FieldFilter("chat_dispatch_pending", "==", True)
+        )
+        return [
+            Assessment.model_validate(s.to_dict())
+            for s in query.stream(timeout=10)
+            if s.reference.path.startswith("users/")
+        ]
+
+    def room_concept_pending(self):
+        query = self.client.collection_group("assessments").where(
+            filter=firestore.FieldFilter("room_concept_dispatch_pending", "==", True)
         )
         return [
             Assessment.model_validate(s.to_dict())

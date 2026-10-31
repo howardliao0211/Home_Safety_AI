@@ -9,6 +9,8 @@ import type {
 } from "../domain/model";
 import type { HistoryItem } from "../domain/history";
 
+import { mergeRoomConcept, type RoomConcept } from "../domain/room-concept";
+
 type RemotePhoto = { id: string; uploaded: boolean; sha256?: string };
 type RemoteOperation = {
   status: Assessment["status"];
@@ -33,6 +35,7 @@ type RemoteFinding = Omit<
   submissions: RemoteSubmission[];
 };
 export type RemoteAssessment = RemoteOperation & {
+  room_concept?: RoomConcept | null;
   id: string;
   title?: string | null;
   created_at: string;
@@ -67,6 +70,9 @@ export function fromServer(
 ): Assessment {
   return {
     id: remote.id,
+    roomConcept: remote.room_concept
+      ? mergeRoomConcept(cached?.roomConcept, remote.room_concept)
+      : undefined,
     title: remote.title || undefined,
     createdAt: remote.created_at,
     profiles: remote.profiles,
@@ -429,6 +435,29 @@ export class BackendClient {
         },
       )
     ).json();
+  }
+  async roomConcept(assessmentId: string): Promise<RoomConcept> {
+    return (
+      await this.request(`/v1/assessments/${assessmentId}/room-concept`)
+    ).json();
+  }
+  async retryRoomConcept(
+    assessmentId: string,
+    attemptId: string,
+  ): Promise<RoomConcept> {
+    return (
+      await this.request(`/v1/assessments/${assessmentId}/room-concept/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ attempt_id: attemptId }),
+      })
+    ).json();
+  }
+  async roomConceptImage(assessmentId: string) {
+    return this.dataUrl(
+      await this.request(`/v1/assessments/${assessmentId}/room-concept/image`),
+      "image/jpeg",
+    );
   }
   async maskDataUrl(assessmentId: string, findingId: string, id: string) {
     return this.dataUrl(

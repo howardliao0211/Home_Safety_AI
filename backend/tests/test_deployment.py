@@ -326,6 +326,7 @@ def test_muse_release_pins_key_and_wires_durable_highlighting(config):
         model="muse-main",
         provider="muse",
         segmentation_model="sam-3.1",
+        image_model="chosen-room-model",
         image=config.repository + "/backend@sha256:" + "a" * 64,
     )
     command = next(c for c in release.commands if "deploy" in c)
@@ -333,6 +334,7 @@ def test_muse_release_pins_key_and_wires_durable_highlighting(config):
     assert "MODEL_PROVIDER=muse" in environment
     assert "MUSE_MAIN_MODEL=muse-main" in environment
     assert "MUSE_SEGMENTATION_MODEL=sam-3.1" in environment
+    assert "MUSE_IMAGE_GEN_MODEL=chosen-room-model" in environment
     assert "ANNOTATION_WORKER_URL=https://test.run.app" in environment
     secrets = next(item for item in command if item.startswith("--set-secrets="))
     assert "MUSE_API_KEY=muse-secret:7" in secrets
@@ -428,14 +430,11 @@ def test_release_runs_in_the_configured_region_with_its_registry_and_queue(confi
     )
     command = next(c for c in release.commands if "deploy" in c)
     assert "--region=australia-southeast1" in command
-    assert any(
-        item.startswith("--image=australia-southeast1-docker.pkg.dev/") for item in command
-    )
+    assert any(item.startswith("--image=australia-southeast1-docker.pkg.dev/") for item in command)
     environment = next(item for item in command if item.startswith("--set-env-vars="))
     assert "/locations/australia-southeast1/queues/" in environment
     assert (
-        "ANNOTATION_WORKER_URL=https://test-service-123.australia-southeast1.run.app"
-        in environment
+        "ANNOTATION_WORKER_URL=https://test-service-123.australia-southeast1.run.app" in environment
     )
 
 

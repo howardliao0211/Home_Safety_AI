@@ -255,7 +255,7 @@ class Deployer:
                 return traffic["url"], traffic["revisionName"]
         raise DeploymentError("Cloud Run did not return the candidate revision URL.")
 
-    def release(self, *, model, image=None, tag=None, provider="groq", segmentation_model=""):
+    def release(self, *, model, image=None, tag=None, provider="groq", segmentation_model="", image_model=""):
         if not model or not re.fullmatch(r"[A-Za-z0-9._/-]+", model):
             raise DeploymentError("Pass --model with a valid model ID for the selected provider.")
         if image and not re.fullmatch(
@@ -267,6 +267,11 @@ class Deployer:
         model_secret = self.config.muse_secret if provider == "muse" else self.config.groq_secret
         model_key = "MUSE_API_KEY" if provider == "muse" else "GROQ_API_KEY"
         model_version = self.latest_version(model_secret)
+        if image_model and not re.fullmatch(r"[A-Za-z0-9._/-]+", image_model):
+            raise DeploymentError("Use a valid image model ID.")
+        secret_bindings = f"{model_key}={model_secret}:{model_version}"
+        if image_model and provider != "muse":
+            secret_bindings += f",MUSE_API_KEY={self.config.muse_secret}:{self.latest_version(self.config.muse_secret)}"
         if not self.config.annotation_worker_url or not self.config.annotation_tasks_queue:
             raise DeploymentError(
                 "Configure the stable worker URL and apply Terraform for durable account cleanup before release."
@@ -290,6 +295,8 @@ class Deployer:
             "PHOTOS_BUCKET": self.config.photos_bucket,
             "BACKEND_SOURCE_HASH": source_hash() if built_here else "external-image",
         }
+        if image_model:
+            environment["MUSE_IMAGE_GEN_MODEL"] = image_model
         if self.config.annotation_worker_url:
             environment.update(
                 {
@@ -336,7 +343,7 @@ class Deployer:
             f"--revision-suffix={release_id}",
             f"--tag={release_id}",
             "--set-env-vars=" + ",".join(f"{key}={value}" for key, value in environment.items()),
-            (f"--set-secrets={model_key}={model_secret}:{model_version}"),
+            (f"--set-secrets={secret_bindings}"),
             "--format=json",
         ]
         if previous:
@@ -617,6 +624,7 @@ def main():
     )
     release.add_argument("--provider", choices=["groq", "muse"], default="groq")
     release.add_argument("--segmentation-model", default="")
+    release.add_argument("--image-model", default=None, help="Muse image model; defaults to MUSE_IMAGE_GEN_MODEL in the environment/root .env; empty disables")
     release.add_argument(
         "--model",
         help="Model ID; required explicitly for Muse releases",
@@ -671,6 +679,8 @@ def main():
                 tag=args.tag,
                 provider=args.provider,
                 segmentation_model=args.segmentation_model,
+                image_model=(args.image_model if args.image_model is not None else
+                             os.environ.get("MUSE_IMAGE_GEN_MODEL", dotenv_values(ROOT / ".env").get("MUSE_IMAGE_GEN_MODEL", "")) or "").strip(),
             )
         elif args.command == "verify":
             deployer.verify()

@@ -107,7 +107,12 @@ test("analysis failure keeps input and succeeds with manual retry", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: "Retry analysis" }).click();
   await expect(page.getByText("0 of 3 handled", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^View / })).toHaveCount(3);
+  await expect(
+    page.getByRole("button", { name: /^View (?!room concept$)/ }),
+  ).toHaveCount(3);
+  await expect(
+    page.getByRole("button", { name: "View room concept", exact: true }),
+  ).toBeVisible();
 });
 
 test("a finding without a follow-up keeps chat available after dismissal", async ({

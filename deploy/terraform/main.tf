@@ -232,3 +232,17 @@ resource "google_project_iam_member" "backend_auth" {
   role    = "roles/firebaseauth.admin"
   member  = "serviceAccount:${google_service_account.backend.email}"
 }
+
+
+resource "google_firestore_field" "room_concept_dispatch" {
+  project    = var.project_id
+  database   = google_firestore_database.assessments.name
+  collection = "assessments"
+  field      = "room_concept_dispatch_pending"
+  index_config {
+    indexes {
+      order       = "ASCENDING"
+      query_scope = "COLLECTION_GROUP"
+    }
+  }
+}

@@ -48,6 +48,14 @@ assessment at creation; supplied to the model as context separate from household
 profiles, never as instructions. Stored as `household_context` /
 `householdContext`.
 
+**Room concept**: A private, saved AI-generated illustration of changes to the
+original room photo based on the initial findings and household context. New
+assessments with findings queue one automatically when `MUSE_IMAGE_GEN_MODEL` and
+Muse credentials are configured. Only explicit retry after failure can make another
+attempt; success is never regenerated. Opening the viewer only reads saved state.
+Concepts are not evidence, do not change finding status and never certify safety.
+They are deleted with their assessment/account.
+
 **Finding chat**: A saved, text-only advisory conversation belonging to one finding.
 Each answer uses the original room photo, household context, current finding, earlier
 chat and completed historical discussion. Chat never changes findings or status.
@@ -167,7 +175,8 @@ a no-hazards result.
 - Required: photo input, structured findings, saved finding chat, checklist state,
   restart persistence, and phone-to-cloud connectivity.
 - Stretch goals, only if time remains after the required one-week scope:
-  photo annotations, assessment comparisons, and illustrative image redesign.
+  assessment comparisons. Illustrative room concepts are now approved scope;
+  see `.scratch/room-concept/spec.md`.
   Annotations require reliable localisation and validated normalised coordinates;
   redesign must never be presented as a validated safety improvement.
 - Persist assessment and draft state across restarts. Home is the default entry

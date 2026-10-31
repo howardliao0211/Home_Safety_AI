@@ -88,6 +88,9 @@ class MemoryRepository:
     def annotation_pending(self):
         return [copy.deepcopy(a) for a in self.records.values() if a.annotation_dispatch_pending]
 
+    def room_concept_pending(self):
+        return [copy.deepcopy(a) for a in self.records.values() if a.room_concept_dispatch_pending]
+
     def chat_pending(self):
         return [copy.deepcopy(a) for a in self.records.values() if a.chat_dispatch_pending]
 
@@ -118,6 +121,13 @@ class MemoryPhotos:
                 del self.objects[key]
                 if self.fail_delete:
                     raise OSError("test partial deletion")
+
+    def room_concept_assets(self):
+        return [
+            (owner, aid, key)
+            for owner, aid, key in list(self.objects)
+            if key.startswith("room-concept-")
+        ]
 
     def annotation_assets(self):
         return [

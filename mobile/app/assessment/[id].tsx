@@ -18,6 +18,7 @@ import {
   styles,
 } from "@/components/ui";
 import { AssessmentSummary } from "@/components/suggestions";
+import { RoomConceptEntry } from "@/components/room-concept";
 import { ChecklistPhoto } from "@/components/checklist-photo";
 import { AssessmentGate } from "@/components/assessment-gate";
 import { NewAssessmentButton } from "@/components/new-assessment-button";
@@ -66,6 +67,7 @@ function AssessmentScreen() {
       </View>
       <ChecklistPhoto assessment={assessment} />
       <AssessmentSummary assessment={assessment} />
+      <RoomConceptEntry assessment={assessment} />
       <Copy kind="small">
         {new Date(assessment.createdAt).toLocaleDateString("en-AU", {
           day: "numeric",

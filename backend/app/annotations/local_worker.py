@@ -12,6 +12,8 @@ from app.assessments.service import AssessmentService
 from app.auth import FirebaseIdentity
 from app.config import Settings
 from app.models.providers.factory import build_provider
+from app.room_concepts.provider import MuseRoomProvider
+from app.room_concepts.service import RoomConceptService
 from app.storage.photos import GCSPhotoStore
 from app.storage.repository import FirestoreRepository
 
@@ -22,9 +24,11 @@ CONCURRENCY = 12
 class LocalWorker:
     """Claims each pending attempt independently, mirroring Cloud Tasks deliveries."""
 
-    def __init__(self, service, concurrency=CONCURRENCY, chat=None):
+    def __init__(self, service, concurrency=CONCURRENCY, chat=None, room_concepts=None):
         self.service = service
         self.chat = chat
+        self.room_concepts = room_concepts
+        self.room_executor = ThreadPoolExecutor(2, thread_name_prefix="room-concept")
         self.executor = ThreadPoolExecutor(concurrency, thread_name_prefix="highlight")
         self.lock = threading.Lock()
         self.running = {}
@@ -36,11 +40,19 @@ class LocalWorker:
             # Same claims as Cloud Tasks deliveries: expiry, then queued attempts.
             self.chat.recover()
             jobs += [(self.chat.work, item) for item in self.chat.pending()]
+        if self.room_concepts:
+            self.room_concepts.recover()
+            jobs += [(self.room_concepts.work, item) for item in self.room_concepts.pending()]
         for work, item in jobs:
             with self.lock:
                 if item in self.running:
                     continue
-                future = self.executor.submit(work, *item)
+                executor = (
+                    self.room_executor
+                    if self.room_concepts and work == self.room_concepts.work
+                    else self.executor
+                )
+                future = executor.submit(work, *item)
                 self.running[item] = future
             future.add_done_callback(lambda _, item=item: self._finished(item))
 
@@ -55,6 +67,7 @@ class LocalWorker:
 
     def close(self):
         self.executor.shutdown(wait=True, cancel_futures=True)
+        self.room_executor.shutdown(wait=True, cancel_futures=True)
 
 
 def main():
@@ -72,7 +85,17 @@ def main():
     )
     model = build_provider(settings)
     chat = ChatService(AssessmentService(records, photos, model))
-    worker = LocalWorker(AnnotationService(records, photos, provider), chat=chat)
+    room_provider = (
+        MuseRoomProvider(settings)
+        if settings.muse_image_gen_model.strip()
+        and settings.muse_api_key
+        and settings.muse_api_key.get_secret_value().strip()
+        else None
+    )
+    concepts = RoomConceptService(records, photos, room_provider)
+    worker = LocalWorker(
+        AnnotationService(records, photos, provider), chat=chat, room_concepts=concepts
+    )
     try:
         while True:
             accounts.recover()

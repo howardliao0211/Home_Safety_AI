@@ -18,6 +18,8 @@ from app.config import Settings
 from app.errors import AppError
 from app.models.providers.factory import build_provider
 from app.models.schemas import new_id
+from app.room_concepts.provider import MuseRoomProvider
+from app.room_concepts.service import RoomConceptService
 from app.storage.photos import GCSPhotoStore
 from app.storage.repository import FirestoreRepository
 
@@ -75,7 +77,17 @@ def create_app(
                 CloudTasksDispatcher(config) if config.annotation_tasks_queue else None
             )
             app.state.annotations = AnnotationService(records, images, highlighting, dispatch)
-            app.state.service = AssessmentService(records, images, model, app.state.annotations)
+            room_provider = (
+                MuseRoomProvider(config)
+                if config.muse_image_gen_model.strip()
+                and config.muse_api_key
+                and config.muse_api_key.get_secret_value().strip()
+                else None
+            )
+            app.state.room_concepts = RoomConceptService(records, images, room_provider, dispatch)
+            app.state.service = AssessmentService(
+                records, images, model, app.state.annotations, app.state.room_concepts
+            )
             app.state.chat = ChatService(app.state.service, dispatch)
             yield
 

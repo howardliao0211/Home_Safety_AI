@@ -365,3 +365,22 @@ npm --prefix mobile test
 
 Sources: [Cloud Run with Cloud Tasks](https://docs.cloud.google.com/run/docs/triggering/using-tasks),
 [Expo environment variables](https://docs.expo.dev/guides/environment-variables/).
+
+
+## Optional room concepts
+
+Set backend-only `MUSE_IMAGE_GEN_MODEL` in root `.env` to enable automatic room
+illustrations for new assessments with findings. `deploy.py start` and `rebuild`
+forward to the release CLI, which resolves this setting for both bootstrap and
+finish. An explicit `--image-model MODEL` overrides it; `--image-model ''` disables
+it. The release CLI also accepts that flag and loads environment variables before
+root `.env`. Releasing builds an explicit Cloud Run environment map, including
+`MUSE_IMAGE_GEN_MODEL`, and pins the existing Muse key to a numbered secret version.
+Groq analysis may coexist with Muse room concepts; that release binds both keys.
+No model keys or image-generation settings belong in the mobile public environment.
+
+Apply Terraform to add the room-concept recovery field index before releasing.
+The existing service-authenticated recovery sweep also recovers concept jobs and
+orphan images. Configuration/model changes require a new release even when the
+container source is unchanged; revision rollback restores that revision's model
+configuration. No existing assessment is backfilled when this feature is enabled.

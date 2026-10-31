@@ -82,6 +82,37 @@ class CloudTasksDispatcher:
                 retry=None,
             )
 
+    def enqueue_room_concept(self, owner, assessment_id, attempt_id):
+        from app.room_concepts.service import TASK_SECONDS
+
+        config = self.settings
+        with tasks_v2.CloudTasksClient() as client:
+            client.create_task(
+                parent=config.annotation_tasks_queue,
+                task={
+                    "http_request": {
+                        "http_method": tasks_v2.HttpMethod.POST,
+                        "url": config.annotation_worker_url + "/internal/room-concepts/work",
+                        "headers": {"Content-Type": "application/json"},
+                        "body": json.dumps(
+                            {
+                                "version": 1,
+                                "owner_uid": owner,
+                                "assessment_id": assessment_id,
+                                "attempt_id": attempt_id,
+                            }
+                        ).encode(),
+                        "oidc_token": {
+                            "service_account_email": config.annotation_worker_service_account,
+                            "audience": config.annotation_worker_url,
+                        },
+                    },
+                    "dispatch_deadline": {"seconds": TASK_SECONDS},
+                },
+                timeout=5,
+                retry=None,
+            )
+
 
 def worker_auth(request: Request):
     settings = request.app.state.settings
@@ -150,4 +181,18 @@ def recover(request: Request):
         # Re-delivery is safe: expired claims become failed, never re-run.
         service.dispatch(a.owner_uid, a.id)
     request.app.state.chat.recover()
+    request.app.state.room_concepts.recover()
+    return {"accepted": True}
+
+
+class RoomDelivery(BaseModel):
+    version: Literal[1]
+    owner_uid: str
+    assessment_id: str
+    attempt_id: str
+
+
+@worker_router.post("/internal/room-concepts/work")
+def room_work(body: RoomDelivery, request: Request):
+    request.app.state.room_concepts.work(body.owner_uid, body.assessment_id, body.attempt_id)
     return {"accepted": True}

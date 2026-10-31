@@ -115,6 +115,7 @@ export type Finding = {
   submissions: Submission[];
 };
 export type Assessment = {
+  roomConcept?: import("./room-concept").RoomConcept;
   id: string;
   title?: string;
   createdAt: string;

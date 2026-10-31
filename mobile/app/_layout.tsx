@@ -137,6 +137,10 @@ function Navigation() {
         }}
       />
       <Stack.Screen
+        name="assessment/[id]/room-concept"
+        options={{ title: "Room concept" }}
+      />
+      <Stack.Screen
         name="finding/[assessmentId]/[findingId]"
         options={{ title: "Finding details" }}
       />

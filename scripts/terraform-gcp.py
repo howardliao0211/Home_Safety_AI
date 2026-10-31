@@ -234,6 +234,7 @@ def teardown(terraform, extra, account, env):
 
 def report_release(account):
     # Inspection only: provisioning must never silently publish a revision.
+    print("Room concept model changes require a release; release reads MUSE_IMAGE_GEN_MODEL from root .env.")
     result = subprocess.run(
         ["terraform", f"-chdir={DIRECTORY}", "output", "-json", "deployment_config"],
         capture_output=True,

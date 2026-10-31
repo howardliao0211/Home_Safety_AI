@@ -172,6 +172,8 @@ class Deployment:
             "--model",
             self.args.model,
         ]
+        if getattr(self.args, "image_model", None) is not None:
+            command.extend(["--image-model", self.args.image_model])
         if highlights:
             command.extend(["--segmentation-model", "sam-3.1"])
         run(command)
@@ -296,6 +298,7 @@ def main():
     )
     parser.add_argument("--stage", choices=["all", "bootstrap", "finish"])
     parser.add_argument("--model", help="Muse model ID; defaults to MUSE_MAIN_MODEL in root .env")
+    parser.add_argument("--image-model", default=None, help="Muse room model; defaults to MUSE_IMAGE_GEN_MODEL in root .env; empty disables")
     parser.add_argument("--account", help="Override the active gcloud account")
     parser.add_argument(
         "--start-expo",
@@ -303,7 +306,7 @@ def main():
         help="Install mobile dependencies and run the tunnel after finish",
     )
     args = parser.parse_args()
-    if args.command == "stop" and (args.stage or args.start_expo or args.model or args.region):
+    if args.command == "stop" and (args.stage or args.start_expo or args.model or args.region or args.image_model is not None):
         parser.error("--stage, --start-expo, --model and --region apply only to start/rebuild")
     if args.command == "rebuild" and (not args.region or args.stage):
         parser.error("rebuild requires --region and runs every stage")

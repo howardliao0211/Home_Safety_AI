@@ -20,6 +20,11 @@ import {
   withPreviewHighlights,
 } from "@/api/preview-highlights";
 import { ApiError, BackendClient } from "@/api/backend-client";
+import {
+  mergeRoomConcept,
+  previewRoomConcept,
+  type RoomConcept,
+} from "@/domain/room-concept";
 import { apiConfig, apiEnabled } from "@/api/config";
 import { appendPhoto } from "@/api/photo-upload";
 import { newApiId } from "@/storage/device";
@@ -516,6 +521,14 @@ function usePreviewState(session: Session) {
                     ? "Quiet Room Review"
                     : "Living Room Review",
             findings,
+            roomConcept:
+              a.scenario === "legacy-summary"
+                ? undefined
+                : previewRoomConcept(
+                    a.scenario,
+                    findings.length > 0,
+                    a.photo.sample === "portrait",
+                  ),
             ...(a.scenario === "legacy-summary"
               ? {
                   summary:
@@ -890,6 +903,45 @@ function usePreviewState(session: Session) {
       void runPreviewReply(aid, fid, tid);
       return conversation ?? before;
     },
+    getRoomConcept: async (id: string) => {
+      const current = assessmentById(id);
+      let concept = current.roomConcept;
+      if (apiEnabled) concept = await (await backend()).roomConcept(id);
+      else if (
+        concept &&
+        ["queued", "running"].includes(concept.state) &&
+        Date.now() >= (concept.previewReadyAt ?? 0)
+      )
+        concept = { ...concept, state: "ready", can_retry: false };
+      if (concept) {
+        const incoming = concept;
+        await editAssessment(id, (a) => ({
+          ...a,
+          roomConcept: mergeRoomConcept(a.roomConcept, incoming),
+        }));
+      }
+      return assessmentById(id).roomConcept;
+    },
+    retryRoomConcept: async (id: string) => {
+      const previous = assessmentById(id).roomConcept;
+      if (!previous?.can_retry) return;
+      const concept: RoomConcept = apiEnabled
+        ? await (await backend()).retryRoomConcept(id, newApiId())
+        : {
+            ...previous,
+            state: "queued",
+            can_retry: false,
+            attempt: (previous.attempt ?? 0) + 1,
+            attempt_id: makeId(),
+            previewReadyAt: Date.now() + 8000,
+          };
+      await editAssessment(id, (a) => ({
+        ...a,
+        roomConcept: mergeRoomConcept(a.roomConcept, concept),
+      }));
+    },
+    loadRoomConceptImage: async (id: string) =>
+      (await backend()).roomConceptImage(id),
     annotationClient: backend,
     /** Server masks arrive tinted by severity; preview draws simulated ones. */
     loadMask: async (

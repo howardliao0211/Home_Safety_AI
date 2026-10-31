@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     muse_api_key: SecretStr | None = None
     muse_main_model: str = ""
     muse_segmentation_model: str = ""
+    muse_image_gen_model: str = ""
     annotation_worker_url: str = ""
     annotation_worker_service_account: str = ""
     annotation_tasks_queue: str = ""

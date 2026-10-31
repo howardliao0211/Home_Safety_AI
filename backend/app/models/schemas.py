@@ -244,6 +244,27 @@ class Lease(StrictModel):
     expires_at: datetime
 
 
+class RoomConcept(StrictModel):
+    state: Literal["not_applicable", "unavailable", "queued", "running", "ready", "failed"]
+    attempt_id: str = Field(default_factory=new_id)
+    attempts: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=now)
+    queued_until: datetime | None = None
+    started_at: datetime | None = None
+    expires_at: datetime | None = None
+    finished_at: datetime | None = None
+    execution: str | None = None
+    error_code: str | None = None
+    model: str | None = None
+    prompt_version: str = "room-concept-v1"
+    request_id: str = Field(default_factory=new_id)
+    prompt: str = ""
+    source_photo: Photo | None = None
+    asset: Photo | None = None
+    width: int | None = None
+    height: int | None = None
+
+
 class Assessment(Operation):
     id: str
     owner_uid: str
@@ -266,9 +287,17 @@ class Assessment(Operation):
     # Recovery index: some chat turn is queued or running.
     chat_dispatch_pending: bool = False
     annotation_commits: dict[str, datetime] = Field(default_factory=dict)
+    room_concept: RoomConcept | None = None
+    room_concept_dispatch_pending: bool = False
+    room_concept_commit: datetime | None = None
 
     @model_validator(mode="after")
     def validate_annotation_commits(self):
+        if self.room_concept and self.room_concept_commit and self.room_concept.state == "ready":
+            job = self.room_concept
+            job.finished_at = self.room_concept_commit
+            if job.expires_at and job.finished_at > job.expires_at:
+                job.state, job.error_code = "failed", "publication_timeout"
         for job in self.annotations:
             if job.id in self.annotation_commits:
                 job.finished_at = self.annotation_commits[job.id]

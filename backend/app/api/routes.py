@@ -18,6 +18,7 @@ from app.models.schemas import (
     FindingPatch,
     Profile,
 )
+from app.room_concepts.service import public_concept
 from app.storage.photos import MAX_UPLOAD_BYTES, prepare_photo
 
 
@@ -57,8 +58,12 @@ def public(assessment: Assessment) -> dict:
             "annotation_dispatch_pending",
             "chat_dispatch_pending",
             "annotation_commits",
+            "room_concept",
+            "room_concept_dispatch_pending",
+            "room_concept_commit",
         },
     )
+    result["room_concept"] = public_concept(assessment.room_concept)
     for finding in result["findings"]:
         finding.pop("chat", None)
         finding.pop("chat_blocked", None)
@@ -319,3 +324,25 @@ def generate_chat(
 ):
     """Explicit Retry/Continue: queue a fresh attempt for the saved question."""
     return chat.retry(device, str(assessment_id), str(finding_id), str(turn_id), body.attempt_id)
+
+
+CONCEPT = "/v1/assessments/{assessment_id}/room-concept"
+
+
+@router.get(CONCEPT)
+def get_room_concept(assessment_id: UUID, request: Request, device: Owner):
+    return request.app.state.room_concepts.get(device, str(assessment_id))
+
+
+@router.post(CONCEPT + "/retry")
+def retry_room_concept(assessment_id: UUID, body: ChatGeneration, request: Request, device: Owner):
+    return request.app.state.room_concepts.retry(device, str(assessment_id), str(body.attempt_id))
+
+
+@router.get(CONCEPT + "/image")
+def room_concept_image(assessment_id: UUID, request: Request, device: Owner):
+    return Response(
+        request.app.state.room_concepts.image(device, str(assessment_id)),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )

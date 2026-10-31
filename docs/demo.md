@@ -363,3 +363,22 @@ Results at implementation (2026-11-01, deterministic test provider, no paid mode
 Physical Android/iOS keyboard, system/gesture back, large system fonts and
 TalkBack/VoiceOver still require a device. No real-model quality or native-device
 verification is implied by deterministic tests or browser screenshots.
+
+
+## Room-concept verification
+
+Room concepts use the original photo and initial findings; the viewer labels the
+image as an illustration, never proof that hazards were removed. In preview,
+Everyday hazards simulates queued-to-ready, A closer look simulates failure with
+manual Retry, and a portrait sample simulates unavailable. No obvious hazards and
+legacy results skip generation. Preview uses a clearly labeled existing sample
+image, not an actual edit of the selected room.
+
+Automated checks cover provider parsing/deadlines, durable claims/retries,
+publication/deletion races, account isolation, private image loading, and preview
+navigation. Live Muse image quality/latency and physical Android/iOS accessibility
+checks require a configured provider/device and were not performed by this change.
+For the manual check, create an assessment, leave the screen during generation,
+reopen its single-image viewer, inspect room identity and intended edits, then
+confirm checklist statuses are unchanged and deletion removes the image. Record
+observed visual errors without claiming safety accuracy.

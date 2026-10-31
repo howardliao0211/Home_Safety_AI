@@ -55,6 +55,7 @@ class PhotoStore(Protocol):
     def delete(self, owner_uid: str, assessment_id: str, photo: Photo) -> None: ...
     def delete_assessment(self, owner_uid: str, assessment_id: str) -> None: ...
     def annotation_assets(self): ...
+    def room_concept_assets(self): ...
     def close(self) -> None: ...
 
 
@@ -132,18 +133,27 @@ class GCSPhotoStore:
                 pass
 
     def annotation_assets(self):
+        yield from (
+            (owner, aid, key.removeprefix("annotation-"))
+            for owner, aid, key in self._generated_assets("annotation-")
+        )
+
+    def room_concept_assets(self):
+        yield from self._generated_assets("room-concept-")
+
+    def _generated_assets(self, prefix):
         for blob in self.client.list_blobs(self.bucket, prefix="users/", timeout=10, retry=None):
             parts = blob.name.split("/")
             if (
                 len(parts) == 5
                 and parts[0] == "users"
                 and parts[2] == "assessments"
-                and parts[4].startswith("annotation-")
+                and parts[4].startswith(prefix)
             ):
                 import base64
 
                 uid = base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)).decode()
-                yield uid, parts[3], parts[4].removeprefix("annotation-")
+                yield uid, parts[3], parts[4]
 
     def close(self):
         self.client.close()

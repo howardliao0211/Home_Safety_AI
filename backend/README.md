@@ -394,3 +394,35 @@ Preview uses separate local conversation state and simulated replies, including 
 **Chat reply retry** scenario. Account-backed chat is always refetched on reopen;
 local unsent drafts and uncertain acceptance identities survive restart and are
 removed with assessment deletion or account cleanup.
+
+
+## Room concepts
+
+Set optional `MUSE_IMAGE_GEN_MODEL` in root `.env` to an image-editing model
+available to your Muse account. It uses backend-only `MUSE_API_KEY`, independently
+of the main and segmentation models. Blank/missing image configuration disables
+this optional feature without blocking assessments. See the official Muse image
+contract at https://dev.meta.ai/docs/image-generation.
+
+New assessments with findings atomically save a frozen initial photo/prompt and
+one queued concept. The existing local worker or authenticated Cloud Tasks worker
+runs it independently of the client; `GET /v1/assessments/{id}/room-concept` only
+observes. `POST .../room-concept/retry` accepts `{ "attempt_id": "<UUID>" }` after
+failure, up to ten attempts. Success is immutable. No-findings and legacy records
+never generate. Later checklist or chat changes never change the initial input.
+The original photo remains the assessment evidence.
+
+Deadlines in `app/room_concepts/service.py`: queue 600 seconds, provider 180,
+execution lease 210 and task dispatch 240, below the 300-second Cloud Run limit.
+These are application limits, not provider latency guarantees. Started calls are
+never automatically repeated. Two image workers per process bound concurrency;
+local image work has a separate executor so it does not occupy highlight/chat
+slots. Recovery re-delivers only unstarted work and fails expired attempts.
+
+The adapter limits responses to 15 MiB, encoded image bytes to 10 MiB and decoded
+images to 20 megapixels. JPEG/PNG/WebP static output is decoded in a bounded,
+killable process and re-encoded as JPEG, stripping metadata. Asset identity is
+reserved before upload and publication checks account/deletion/attempt/lease
+fences; Firestore commit timestamps reject late results. Generated `room-concept-`
+objects join orphan cleanup and prefix deletion. `GET .../room-concept/image`
+serves only a ready owner's image with `no-store`; no provider URL is public.

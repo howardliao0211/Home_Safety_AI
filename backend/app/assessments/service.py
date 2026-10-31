@@ -66,9 +66,11 @@ class AssessmentService:
         photos: PhotoStore,
         provider: ModelProvider,
         annotations=None,
+        room_concepts=None,
     ):
         self.repository, self.photos, self.provider = repository, photos, provider
         self.annotations = annotations
+        self.room_concepts = room_concepts
 
     def get(self, owner_uid: str, assessment_id: str) -> Assessment:
         return require(self.repository.get(owner_uid, assessment_id))
@@ -371,12 +373,16 @@ class AssessmentService:
                     if self.annotations:
                         # Same commit as the findings, so a crash cannot lose highlight work.
                         self.annotations.seed(current, proposed, request_id)
+                    if self.room_concepts:
+                        self.room_concepts.seed(current, request_id)
                 current.lease = None
 
             completed = self._mutate(owner_uid, assessment_id, complete, lease_id=lease.id)
             if self.annotations and not submission_id:
                 # Enqueue failure leaves durable intent for the recovery sweep.
                 self.annotations.dispatch(owner_uid, assessment_id)
+            if self.room_concepts and not submission_id:
+                self.room_concepts.dispatch(owner_uid, assessment_id)
             return completed
         except Exception as exc:
             if isinstance(exc, AppError) and exc.code in {"superseded", "not_found", "deleting"}:
@@ -453,6 +459,7 @@ class AssessmentService:
             previous.deleting = True
             previous.annotation_dispatch_pending = False
             previous.chat_dispatch_pending = False
+            previous.room_concept_dispatch_pending = False
             for annotation in previous.annotations:
                 if annotation.state in {"queued", "processing"}:
                     annotation.state = "failed"
