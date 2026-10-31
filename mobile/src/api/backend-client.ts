@@ -41,6 +41,8 @@ export type RemoteAssessment = RemoteOperation & {
   /** Absent only on records saved before the field existed. */
   household_context?: string;
   summary: string | null;
+  /** Null/absent on legacy records saved before structured suggestions. */
+  suggestions?: string[] | null;
   findings: RemoteFinding[];
 };
 
@@ -73,6 +75,7 @@ export function fromServer(
     attempts: remote.attempts,
     error: remote.error || undefined,
     summary: remote.summary || undefined,
+    suggestions: remote.suggestions ?? undefined,
     serverSaved: true,
     scenario: cached?.scenario || "hazards",
     photo: photoFromServer(remote.photo, remote.id, cached?.photo),

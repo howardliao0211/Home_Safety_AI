@@ -6,7 +6,8 @@ export type Scenario =
   | "clear"
   | "analysis-error"
   | "update-error"
-  | "permission-denied";
+  | "permission-denied"
+  | "legacy-summary";
 export const scenarios: { id: Scenario; title: string; description: string }[] =
   [
     {
@@ -38,6 +39,11 @@ export const scenarios: { id: Scenario; title: string; description: string }[] =
       id: "permission-denied",
       title: "Camera permission denied",
       description: "Simulated denial; gallery and samples remain available.",
+    },
+    {
+      id: "legacy-summary",
+      title: "Saved before suggestions",
+      description: "An older record with a prose summary and no suggestions.",
     },
   ];
 export type Photo = {
@@ -119,7 +125,10 @@ export type Assessment = {
   attempts: number;
   error?: string;
   findings: Finding[];
+  /** Legacy prose summary, kept as saved. New results use `suggestions`. */
   summary?: string;
+  /** Undefined: legacy record. Empty: no findings. Otherwise exactly three items. */
+  suggestions?: string[];
   serverSaved?: boolean;
 };
 export type AppState = {

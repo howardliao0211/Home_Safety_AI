@@ -62,6 +62,24 @@ export function fixtureFindings(scenario: Assessment["scenario"]): Finding[] {
     },
   ];
 }
+/** Simulated, household-aware priorities; never generated for zero findings. */
+export function fixtureSuggestions(
+  assessment: Pick<Assessment, "profiles" | "householdContext">,
+  findings: Finding[],
+): string[] {
+  if (!findings.length) return [];
+  const details = assessment.householdContext?.trim();
+  const who = details
+    ? `Keep your household details in mind (“${details.length > 80 ? `${details.slice(0, 77)}…` : details}”) when choosing what to do first.`
+    : assessment.profiles.length
+      ? `Think about how each ${assessment.profiles.map((p) => p.toLowerCase()).join(", ")} in your home uses this room when choosing what to do first.`
+      : "Think about who uses this room most when choosing what to do first.";
+  return [
+    `Start with “${findings[0].title.toLowerCase()}”, the highest-priority item in this sample.`,
+    who,
+    "Look at the room again after any changes; a photo can’t confirm a fix.",
+  ];
+}
 export interface AssessmentService {
   assess(assessment: Assessment): Promise<Finding[]>;
   check(

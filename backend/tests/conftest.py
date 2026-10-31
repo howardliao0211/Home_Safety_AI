@@ -141,7 +141,11 @@ def content():
 
 def assessment_result(follow_up_kind="text"):
     return {
-        "summary": "One potential visible hazard.",
+        "suggestions": [
+            "Start with the cable across the walking route.",
+            "Keep the route clear, especially at night.",
+            "Check again after moving furniture.",
+        ],
         "findings": [
             {
                 **content(),

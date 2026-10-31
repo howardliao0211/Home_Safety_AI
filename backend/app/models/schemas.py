@@ -61,10 +61,25 @@ class ProposedFinding(FindingContent):
         return data
 
 
+Suggestion = Annotated[str, Field(min_length=1, max_length=500)]
+SUGGESTION_COUNT = 3
+
+
 class AssessmentResult(StrictModel):
     title: Annotated[str | None, Field(max_length=3000)]
-    summary: Text
+    # Structured plain-text items: exactly three with findings, none without.
+    suggestions: Annotated[list[Suggestion], Field(max_length=SUGGESTION_COUNT)]
     findings: Annotated[list[ProposedFinding], Field(max_length=12)]
+
+    @model_validator(mode="after")
+    def validate_suggestions(self):
+        expected = SUGGESTION_COUNT if self.findings else 0
+        if len(self.suggestions) != expected:
+            raise ValueError(f"Expected {expected} suggestions.")
+        keys = {item.strip().casefold() for item in self.suggestions}
+        if "" in keys or len(keys) != len(self.suggestions):
+            raise ValueError("Suggestions must be distinct and nonblank.")
+        return self
 
     @model_validator(mode="before")
     @classmethod
@@ -225,7 +240,9 @@ class Assessment(Operation):
     profiles: list[Profile]
     household_context: str = ""
     input_hash: str
-    summary: str | None = None
+    summary: str | None = None  # Legacy prose; new results use suggestions.
+    # None: legacy/not yet analysed. []: new result with no findings.
+    suggestions: list[str] | None = None
     title: Annotated[str | None, Field(max_length=3000)] = None
     findings: list[Finding] = Field(default_factory=list)
     disclaimer: str = DISCLAIMER

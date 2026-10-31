@@ -11,7 +11,7 @@ import {
   validateQuestion,
   type Conversation,
 } from "@/domain/chat";
-import { previewService } from "@/api/preview-service";
+import { fixtureSuggestions, previewService } from "@/api/preview-service";
 import { ApiError, BackendClient } from "@/api/backend-client";
 import { apiConfig, apiEnabled } from "@/api/config";
 import { appendPhoto } from "@/api/photo-upload";
@@ -405,6 +405,13 @@ function usePreviewState(session: Session) {
                     ? "Quiet Room Review"
                     : "Living Room Review",
             findings,
+            ...(a.scenario === "legacy-summary"
+              ? {
+                  summary:
+                    "Simulated older record: this sample was saved before suggestions, so its original summary is shown as written.",
+                  suggestions: undefined,
+                }
+              : { suggestions: fixtureSuggestions(a, findings) }),
             error: undefined,
           }));
         } catch (e) {

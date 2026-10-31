@@ -122,8 +122,15 @@ most 1600 pixels per side, and stores a JPEG without metadata. IDs and photo
 references are generated and checked by the server.
 
 Initial analysis also produces a neutral room `title` (prompted at 1–4 words),
-saved alongside the summary and findings. Missing/blank titles remain compatible
-with older records. The frontend displays “Room assessment” with the date when
+saved alongside the suggestions and findings. Missing/blank titles remain compatible
+with older records.
+
+`suggestions` is a list of plain-text items saved with the initial analysis: exactly
+three distinct, nonblank items (each at most 500 characters) when there are findings,
+and `[]` when there are none. Any other count fails the analysis through the normal
+manual-retry path. Status changes, chat, highlights and reopening never regenerate
+them. Records saved before this field have `suggestions: null` and keep their legacy
+prose `summary`; new results have `summary: null`. The frontend displays “Room assessment” with the date when
 missing, and truncates titles longer than eight words without changing stored text.
 History returns at most `limit` items (1–100, default 20), ordered by creation time
 then ID descending. Pass the opaque `next_cursor` to load the next page; cursors

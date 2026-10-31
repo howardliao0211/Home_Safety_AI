@@ -36,7 +36,11 @@ class IntegrationProvider:
             }
             return {
                 "title": "Living Room Review",
-                "summary": "Browser integration fixture: two potential findings.",
+                "suggestions": [
+                    "Browser fixture: start with the cabinet near the sitting area.",
+                    "Keep the walking route clear for everyone in the household.",
+                    "Look at the room again after any changes.",
+                ],
                 "findings": [
                     {
                         **common,

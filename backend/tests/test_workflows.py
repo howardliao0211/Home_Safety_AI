@@ -84,12 +84,12 @@ def test_invalid_model_output_is_failure_not_empty_success(rig, create, caplog):
 def test_qualified_no_hazards_result(rig, create):
     client, _, _, provider = rig
     provider.results.append(
-        {"summary": "No obvious visible hazards; this does not establish safety.", "findings": []}
+        {"title": None, "suggestions": [], "findings": []}
     )
     assessment = create()
     result = client.post(base(assessment) + "/analyze").json()
     assert result["status"] == "complete" and result["findings"] == []
-    assert result["summary"] and result["disclaimer"]
+    assert result["suggestions"] == [] and result["disclaimer"]
 
 
 def test_failed_follow_up_preserves_finding_and_manual_retry(rig, assessed):

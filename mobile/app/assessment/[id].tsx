@@ -18,6 +18,7 @@ import {
   Screen,
   styles,
 } from "@/components/ui";
+import { AssessmentSummary } from "@/components/suggestions";
 import { AssessmentGate } from "@/components/assessment-gate";
 import { NewAssessmentButton } from "@/components/new-assessment-button";
 import { colors } from "@/components/theme";
@@ -63,8 +64,8 @@ function AssessmentScreen() {
               : "This sample returned no obvious visible hazards. It is not a declaration that the room is safe."}
         </Copy>
       </View>
-      {assessment.summary && <Copy>{assessment.summary}</Copy>}
       <PhotoView photo={assessment.photo} compact />
+      <AssessmentSummary assessment={assessment} />
       <Copy kind="small">
         {new Date(assessment.createdAt).toLocaleDateString("en-AU", {
           day: "numeric",

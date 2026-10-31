@@ -356,7 +356,8 @@ class AssessmentService:
                         result.findings,
                         key=lambda item: {"High": 0, "Medium": 1, "Low": 2}[item.severity],
                     )
-                    current.summary = result.summary
+                    current.summary = None
+                    current.suggestions = list(result.suggestions)
                     current.title = result.title
                     current.findings = [
                         Finding(
