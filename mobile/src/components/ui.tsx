@@ -93,7 +93,7 @@ export function Button({
 }: {
   label: string;
   onPress: () => void;
-  variant?: "primary" | "secondary" | "text" | "danger";
+  variant?: "primary" | "secondary" | "text" | "danger" | "destructive";
   icon?: IconName;
   disabled?: boolean;
   loading?: boolean;
@@ -102,7 +102,7 @@ export function Button({
   const { busy } = usePreview();
   const unavailable = disabled || busy;
   const foreground =
-    variant === "primary"
+    variant === "primary" || variant === "destructive"
       ? "#fff"
       : variant === "danger"
         ? colors.danger
@@ -120,13 +120,15 @@ export function Button({
         styles.button,
         variant === "primary"
           ? { backgroundColor: colors.accent }
-          : variant === "secondary"
-            ? {
-                borderWidth: 1,
-                borderColor: colors.line,
-                backgroundColor: colors.surface,
-              }
-            : {},
+          : variant === "destructive"
+            ? { backgroundColor: colors.danger }
+            : variant === "secondary"
+              ? {
+                  borderWidth: 1,
+                  borderColor: colors.line,
+                  backgroundColor: colors.surface,
+                }
+              : {},
         { opacity: unavailable ? 0.48 : pressed ? 0.75 : 1 },
       ]}
     >
@@ -336,6 +338,7 @@ export function ConfirmDialog({
   title,
   message,
   confirm = "Confirm",
+  cancel = "Keep it",
   onConfirm,
   onCancel,
 }: {
@@ -343,6 +346,7 @@ export function ConfirmDialog({
   title: string;
   message: string;
   confirm?: string;
+  cancel?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -359,8 +363,8 @@ export function ConfirmDialog({
             {title}
           </Copy>
           <Copy>{message}</Copy>
-          <Button label={confirm} variant="danger" onPress={onConfirm} />
-          <Button label="Keep it" variant="secondary" onPress={onCancel} />
+          <Button label={confirm} variant="destructive" onPress={onConfirm} />
+          <Button label={cancel} variant="secondary" onPress={onCancel} />
         </View>
       </View>
     </Modal>

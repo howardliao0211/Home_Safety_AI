@@ -153,7 +153,7 @@ test("a finding without a follow-up keeps chat available after dismissal", async
 
 test("new draft cancellation retains the previous assessment; deletion returns Home with earlier data", async ({
   page,
-}) => {
+}, testInfo) => {
   await sampleAssessment(page);
   const first = page.url();
   await page
@@ -181,21 +181,58 @@ test("new draft cancellation retains the previous assessment; deletion returns H
   await page
     .getByRole("button", { name: "Delete assessment", exact: true })
     .click();
+  const dialog = page.getByRole("dialog");
+  const confirmDelete = dialog.getByRole("button", {
+    name: "Delete assessment",
+    exact: true,
+  });
+  await expect(confirmDelete).toHaveCSS("background-color", "rgb(148, 60, 48)");
+  await expect(
+    confirmDelete.getByText("Delete assessment", { exact: true }),
+  ).toHaveCSS("color", "rgb(255, 255, 255)");
+  expect((await confirmDelete.boundingBox())!.height).toBeGreaterThanOrEqual(
+    48,
+  );
+  await page.setViewportSize({ width: 320, height: 800 });
+  const bounds = (await confirmDelete.boundingBox())!;
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(320);
+  await page.screenshot({
+    path: testInfo.outputPath("delete-assessment-dialog.png"),
+  });
+  await dialog
+    .getByRole("button", { name: "Keep assessment", exact: true })
+    .click();
+  await expect(dialog).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Delete assessment", exact: true }),
+  ).toBeVisible();
   await page
-    .getByRole("button", { name: "Delete assessment and photos" })
+    .getByRole("button", { name: "Delete assessment", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Delete assessment", exact: true })
     .click();
   await expect(page).toHaveURL(/\/$/);
+  await expect(
+    page.getByText("This change could not be completed", { exact: true }),
+  ).toHaveCount(0);
   await page.getByRole("button", { name: /^Open Living Room Review/ }).click();
   await expect(page).toHaveURL(first);
   await page
     .getByRole("button", { name: "Delete assessment", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Delete assessment and photos" })
+    .getByRole("dialog")
+    .getByRole("button", { name: "Delete assessment", exact: true })
     .click();
   await expect(
     page.getByRole("button", { name: "Assess a room" }),
   ).toBeVisible();
+  await expect(
+    page.getByText("This change could not be completed", { exact: true }),
+  ).toHaveCount(0);
 });
 
 test("actual browser upload persists across reload and deletion removes retained data", async ({
@@ -235,7 +272,8 @@ test("actual browser upload persists across reload and deletion removes retained
     .getByRole("button", { name: "Delete assessment", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Delete assessment and photos" })
+    .getByRole("dialog")
+    .getByRole("button", { name: "Delete assessment", exact: true })
     .click();
   await expect(
     page.getByRole("button", { name: "Assess a room" }),

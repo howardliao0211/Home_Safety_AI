@@ -182,7 +182,8 @@ function AssessmentScreen() {
             ? "Its checklist and all associated photos will be removed from the service and this device. This cannot be undone."
             : "Its checklist and all initial, follow-up, and review photos will be removed from this device. This cannot be undone."
         }
-        confirm="Delete assessment and photos"
+        confirm="Delete assessment"
+        cancel="Keep assessment"
         onCancel={() => setDeleting(false)}
         onConfirm={() =>
           void deleteAssessment(id).then((ok) => {

@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator } from "react-native";
-import { router } from "expo-router";
+import { Redirect, router } from "expo-router";
 import { usePreview } from "@/hooks/preview-context";
 import { Button, Copy, Screen } from "./ui";
 import { colors } from "./theme";
@@ -17,9 +17,13 @@ export function AssessmentGate({
   const exists = state.assessments.some((a) => a.id === id);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const openedId = useRef<string | undefined>(undefined);
   useEffect(() => {
     let active = true;
-    if (!exists) {
+    if (exists) openedId.current = id;
+    // Cache removal after opening is deletion, not a request to hydrate again.
+    // Navigation may leave this gate mounted briefly after deletion completes.
+    if (!exists && openedId.current !== id) {
       setFailed(false);
       void loadAssessment(id).then((result) => {
         if (active && !result) setFailed(true);
@@ -30,6 +34,7 @@ export function AssessmentGate({
     };
   }, [id, exists, attempt]);
   if (exists) return <>{children}</>;
+  if (openedId.current === id) return <Redirect href="/" />;
   return (
     <Screen>
       <Copy kind="heading">

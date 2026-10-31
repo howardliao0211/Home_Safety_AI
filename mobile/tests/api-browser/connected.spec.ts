@@ -246,7 +246,8 @@ test("connected lifecycle: upload, retained failures, retry, cache-free restore,
     .getByRole("button", { name: "Delete assessment", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Delete assessment and photos", exact: true })
+    .getByRole("dialog")
+    .getByRole("button", { name: "Delete assessment", exact: true })
     .click();
   await expect(
     page.getByRole("button", { name: "Assess a room", exact: true }),
@@ -405,7 +406,8 @@ test("real file upload, failed status write, server restart state and history re
     .getByRole("button", { name: "Delete assessment", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Delete assessment and photos", exact: true })
+    .getByRole("dialog")
+    .getByRole("button", { name: "Delete assessment", exact: true })
     .click();
   await expect(page).toHaveURL(/\/$/);
   await page.getByRole("button", { name: /^Open / }).click();
