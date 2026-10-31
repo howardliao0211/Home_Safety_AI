@@ -404,6 +404,15 @@ of the main and segmentation models. Blank/missing image configuration disables
 this optional feature without blocking assessments. See the official Muse image
 contract at https://dev.meta.ai/docs/image-generation.
 
+Room concepts use `POST https://api.meta.ai/v1/images/edits` with Meta's JSON edit
+body: the frozen `prompt`, original photo as one inline `images[].image_url`,
+`n:1`, `response_format:"b64_json"`, `output_format:"jpeg"`, and `stream:false`.
+All search/shell flags are disabled in `tool_enablement`. Exactly one
+`data[].b64_json` image is validated and saved; signed URLs and Responses output
+are rejected without fetching or endpoint fallback. Initial assessment and finding
+chat Muse calls continue using their separate Responses contracts. Saved concepts
+are retained; the endpoint change never regenerates them.
+
 New assessments with findings atomically save a frozen initial photo/prompt and
 one queued concept. The existing local worker or authenticated Cloud Tasks worker
 runs it independently of the client; `GET /v1/assessments/{id}/room-concept` only

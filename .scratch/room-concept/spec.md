@@ -134,15 +134,19 @@ through the current text/structured-JSON provider contract. The official
 [Muse image-generation documentation](https://dev.meta.ai/docs/image-generation)
 establishes these integration requirements:
 
-- Send `POST https://api.meta.ai/v1/responses` with bearer authentication and the
-  configured model. Supply the prompt and original photo as `input_text` and
-  inline `input_image` content; do not make the private source publicly readable.
-- Set `store: false`; this is a one-shot edit without provider conversation history.
-- Disable image search, web search and shell tools for this room-photo task.
-- Select completed `image_generation_call` output by type and decode its base64
-  `result`; reasoning/message output may accompany it. Request one image.
-- Choose an explicit supported output format. A requested `size` expresses aspect
-  ratio and does not guarantee exact returned pixel dimensions.
+- Send `POST https://api.meta.ai/v1/images/edits` with bearer authentication and
+  the configured model. Use Meta's JSON edit contract: `prompt` is the frozen
+  instruction and `images` contains one inline `image_url` data URL of the original
+  photo. Do not make the source publicly readable or upload it to the Files API.
+- Set `n: 1`, `response_format: "b64_json"`, `output_format: "jpeg"`, and
+  `stream: false`. This is a one-shot edit without conversation history; do not
+  send Responses-only fields such as `store`, `input`, `tools` or response IDs.
+- Disable image search, web search and shell using top-level `tool_enablement`.
+- Validate that `data` contains exactly one image and decode its `b64_json`.
+  Reject URL-only results, malformed output and old Responses envelopes. Do not
+  follow signed URLs or fall back to another endpoint.
+- Validate actual image bytes independently of the echoed `output_format`.
+  A requested `size` expresses aspect ratio, not exact returned pixel dimensions.
 
 Use the app's durable job, not an unverified assumption that provider background
 mode supports this image model. Do not stream provider reasoning to the viewer.
@@ -155,7 +159,7 @@ configuration. No `EXPO_PUBLIC_` model credential or direct mobile provider call
 
 ## Private assets, validation and deletion
 
-Validate successful provider status, the expected image item, bounded response
+Validate successful HTTP status, the single expected image item, bounded response
 bytes/base64, decoded format, pixel dimensions and decodability before publication.
 Reject empty, malformed, oversized or unexpected output. Select concrete bounded
 byte/pixel limits and an app-supported display encoding during implementation;
@@ -277,3 +281,9 @@ that a redesign is never a validated safety improvement.
 The user explicitly confirmed the agreed scope before this specification was
 created. No implementation, deployment or real image generation was performed
 as part of the spec task.
+
+
+Endpoint amendment confirmed 2026-11-01: the user approved the JSON
+`/v1/images/edits` contract above, replacing the initial Responses image contract.
+Only the room-concept adapter changes. Preserve saved images, durable jobs,
+timeouts and manual retry rules; no automatic regeneration or endpoint fallback.

@@ -1,6 +1,8 @@
 # Room-concept endpoint research
 
-Reviewed 2026-11-01 against official Meta documentation; no provider calls or adapter changes.
+Reviewed 2026-11-01 against official Meta documentation. No live provider calls
+were performed. The user subsequently approved and implemented the endpoint
+migration described below.
 
 **Recommendation:** `/v1/images/edits` best matches our one-shot photo edit; `/v1/images/generations` is text-to-image. Responses remains valid. Migration would simplify the interface, without demonstrated fidelity or latency gains. [Image-generation guide](https://dev.meta.ai/docs/image-generation#one-off-generation)
 
@@ -8,7 +10,7 @@ Reviewed 2026-11-01 against official Meta documentation; no provider calls or ad
 | --- | --- |
 | `/v1/images/generations` | Poor: does not provide the documented source-image edit contract. |
 | `/v1/images/edits` | Best semantic fit: one source photo plus the frozen initial findings in an edit prompt. |
-| `/v1/responses` | Valid current implementation: one user message with `input_text` and inline `input_image`, `store:false`, no history. |
+| `/v1/responses` | Supported alternative (previous implementation): one user message with `input_text` and inline `input_image`, `store:false`, no history. |
 
 These are the same `muse-image-1.0` model, not documented fidelity tiers. Meta lists both image generation and editing on the model and supports Responses and single-shot images APIs. [Models](https://dev.meta.ai/docs/models#muse-image)
 
@@ -24,4 +26,7 @@ Guide limits: 1–10 edit inputs, 16:1 maximum aspect ratio; no masks or `input_
 
 `store:false` disables Responses persistence for retrieval/chaining. [Responses schemas](https://dev.meta.ai/docs/api-reference/responses/schemas) It does **not** establish zero provider retention. Meta ZDR needs separate organization enablement, varies by model and retains legal/misuse exceptions; qualifying policy-violation content may remain up to two years. [Meta ZDR](https://dev.meta.ai/help/policies-and-privacy/zero-data-retention)
 
-Current spec explicitly requires Responses. Any future edit-endpoint migration should update that contract and adapter tests together. The independently diagnosed JPEG `is_animated` decoding failure is local validation and supplies no evidence against either endpoint. No migration is needed to fix it. No measured latency/fidelity comparison was performed.
+The user approved migration to `/v1/images/edits` on 2026-11-01; the spec and
+adapter tests now require its JSON request and `data[].b64_json` response. Existing
+saved images, job execution, timeouts and manual retries remain unchanged. There
+is no automatic regeneration or fallback to Responses. The independently diagnosed JPEG `is_animated` decoding failure is local validation and supplies no evidence against either endpoint. The JPEG fix remains necessary independently of the endpoint migration. No measured latency/fidelity comparison was performed.

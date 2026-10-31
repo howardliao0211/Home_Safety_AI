@@ -117,7 +117,9 @@ professional home safety inspection.”
   structured output with server-managed response history disabled. Groq remains
   available for development through `MODEL_PROVIDER=groq`, `GROQ_API_KEY`, and
   `GROQ_MODEL`. Both implement the shared model adapter interface. There is no
-  automatic provider fallback or model retry.
+  automatic provider fallback or model retry. Room concepts use a separate Muse
+  image-edit adapter at `https://api.meta.ai/v1/images/edits`, selected by
+  backend-only `MUSE_IMAGE_GEN_MODEL`, with inline photo input and base64 output.
 - Persistence: Firestore Standard edition in Native mode, located in `australia-southeast1`.
   Regional resources move only through a destructive rebuild (`deploy rebuild`),
   which discards assessment data and keeps accounts and model secrets.

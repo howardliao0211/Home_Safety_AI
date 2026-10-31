@@ -19,12 +19,10 @@ MAX_PIXELS = 20_000_000
 
 
 def decode_image(payload):
-    if payload.get("status") != "completed":
-        raise ValueError("Incomplete response")
-    items = [o for o in payload.get("output", []) if o.get("type") == "image_generation_call"]
-    if len(items) != 1 or items[0].get("status") != "completed":
-        raise ValueError("Expected one completed image")
-    encoded = items[0].get("result")
+    items = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
+        raise ValueError("Expected one edited image")
+    encoded = items[0].get("b64_json")
     if not isinstance(encoded, str) or len(encoded) > ((MAX_IMAGE_BYTES + 2) // 3) * 4:
         raise ValueError("Invalid image size")
     data = base64.b64decode(encoded, validate=True)
@@ -71,29 +69,19 @@ class MuseRoomProvider:
     async def _generate(self, prompt, photo, content_type, deadline):
         body = {
             "model": self.model,
-            "store": False,
-            "input": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": prompt},
-                        {
-                            "type": "input_image",
-                            "image_url": f"data:{content_type};base64,"
-                            + base64.b64encode(photo).decode(),
-                        },
-                    ],
-                }
+            "prompt": prompt,
+            "images": [
+                {"image_url": f"data:{content_type};base64," + base64.b64encode(photo).decode()}
             ],
-            "tools": [
-                {
-                    "type": "image_generation",
-                    "enable_image_search": False,
-                    "enable_web_search": False,
-                    "enable_shell": False,
-                    "output_format": "jpeg",
-                }
-            ],
+            "n": 1,
+            "response_format": "b64_json",
+            "output_format": "jpeg",
+            "stream": False,
+            "tool_enablement": {
+                "enable_image_search": False,
+                "enable_web_search": False,
+                "enable_shell": False,
+            },
         }
         category = "image_transport"
         try:
@@ -102,7 +90,7 @@ class MuseRoomProvider:
             async with httpx.AsyncClient(transport=self.transport) as client:
                 async with client.stream(
                     "POST",
-                    "https://api.meta.ai/v1/responses",
+                    "https://api.meta.ai/v1/images/edits",
                     headers={"Authorization": "Bearer " + self.key},
                     json=body,
                     timeout=max(0.01, deadline - time.monotonic()),

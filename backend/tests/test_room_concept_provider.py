@@ -22,21 +22,15 @@ def test_edits_reference_photo_with_configured_model(settings, photo_bytes, enco
     requests = []
 
     def respond(request):
-        assert str(request.url) == "https://api.meta.ai/v1/responses"
+        assert str(request.url) == "https://api.meta.ai/v1/images/edits"
         assert request.headers["Authorization"] == "Bearer image-key"
         requests.append(json.loads(request.content))
         return httpx.Response(
             200,
             json={
-                "status": "completed",
-                "output": [
-                    {"type": "reasoning"},
-                    {
-                        "type": "image_generation_call",
-                        "status": "completed",
-                        "result": base64.b64encode(response_bytes).decode(),
-                    },
-                ],
+                "created": 1784584435,
+                "data": [{"b64_json": base64.b64encode(response_bytes).decode()}],
+                "output_format": encoding.lower(),
             },
         )
 
@@ -51,31 +45,35 @@ def test_edits_reference_photo_with_configured_model(settings, photo_bytes, enco
     assert image.startswith(b"\xff\xd8")  # Validated/re-encoded JPEG, not raw provider bytes.
     body = requests[0]
     assert body["model"] == "chosen-image-model"
-    assert body["store"] is False
-    assert body["input"][0]["content"][1]["image_url"].startswith("data:image/png;base64,")
-    assert body["tools"][0]["enable_web_search"] is False
-    assert body["tools"][0]["enable_image_search"] is False
-    assert body["tools"][0]["enable_shell"] is False
+    assert body["prompt"] == "Edit this room"
+    assert body["n"] == 1
+    assert body["response_format"] == "b64_json"
+    assert body["output_format"] == "jpeg"
+    assert body["images"] == [
+        {"image_url": "data:image/png;base64," + base64.b64encode(photo_bytes).decode()}
+    ]
+    assert body["tool_enablement"] == {
+        "enable_web_search": False,
+        "enable_image_search": False,
+        "enable_shell": False,
+    }
+    assert not {"input", "tools", "store", "previous_response_id"} & body.keys()
 
 
 @pytest.mark.parametrize(
     "payload",
     [
-        {"status": "completed", "output": []},
-        {"status": "incomplete", "output": []},
+        {},
+        {"data": []},
+        {"data": None},
+        {"data": [None]},
+        {"data": [{"b64_json": "bad!!"}]},
+        {"data": [{"b64_json": "bm90IGFuIGltYWdl"}]},
+        {"data": [{"url": "https://signed.example.test/image"}]},
+        {"data": [{"b64_json": "YQ=="}, {"b64_json": "Yg=="}]},
         {
             "status": "completed",
-            "output": [{"type": "image_generation_call", "status": "completed", "result": "bad!!"}],
-        },
-        {
-            "status": "completed",
-            "output": [
-                {
-                    "type": "image_generation_call",
-                    "status": "completed",
-                    "result": "bm90IGFuIGltYWdl",
-                }
-            ],
+            "output": [{"type": "image_generation_call", "status": "completed", "result": "YQ=="}],
         },
     ],
 )
@@ -134,16 +132,7 @@ def test_animated_image_is_still_rejected(settings):
     def respond(request):
         return httpx.Response(
             200,
-            json={
-                "status": "completed",
-                "output": [
-                    {
-                        "type": "image_generation_call",
-                        "status": "completed",
-                        "result": base64.b64encode(output.getvalue()).decode(),
-                    }
-                ],
-            },
+            json={"data": [{"b64_json": base64.b64encode(output.getvalue()).decode()}]},
         )
 
     provider = MuseRoomProvider(settings, transport=httpx.MockTransport(respond))
