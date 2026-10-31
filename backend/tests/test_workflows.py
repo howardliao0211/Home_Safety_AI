@@ -379,3 +379,33 @@ def test_provider_cannot_change_status_or_request_another_follow_up(rig, assesse
     after = client.get(base(assessed)).json()["findings"][0]
     assert after["status"] == before["status"] and after["follow_up"] == before["follow_up"]
     assert after["submissions"][0]["status"] == "failed"
+
+
+def test_household_details_reach_analysis_and_finding_chat(rig, create):
+    client, _, _, provider = rig
+    details = "A 2-year-old\n\n  and an adult who uses a walker 🐈"
+    assessment = create(household_context=details)
+    assert assessment["household_context"] == details
+    analyzed = client.post(base(assessment) + "/analyze").json()
+    assert provider.calls[-1]["context"]["household_context"] == details
+    assert provider.calls[-1]["context"]["profiles"] == ["Older adult", "Baby", "Pet"]
+    assert len(provider.calls[-1]["images"]) == 1
+    assert client.get(base(assessment)).json()["household_context"] == details
+    chat = finding_path(analyzed) + "/chat"
+    turn = str(uuid4())
+    client.post(chat + "/turns", json={"id": turn, "question": "What first?"})
+    provider.results.append({"answer": "Start with the walking route."})
+    generated = client.post(chat + f"/turns/{turn}/generate", json={"attempt_id": str(uuid4())})
+    assert generated.status_code == 200, generated.text
+    assert provider.calls[-1]["context"]["household_context"] == details
+
+
+def test_household_details_limit_counts_code_points(rig, create, photo_bytes):
+    client, *_ = rig
+    assert create(household_context="🐈" * 3000)["household_context"] == "🐈" * 3000
+    response = client.post(
+        "/v1/assessments",
+        data={"assessment_id": str(uuid4()), "household_context": "🐈" * 3001},
+        files={"photo": ("room.png", photo_bytes, "image/png")},
+    )
+    assert response.status_code == 422

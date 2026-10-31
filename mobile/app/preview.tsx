@@ -108,7 +108,7 @@ export default function PreviewTools() {
       <ConfirmDialog
         visible={replacing}
         title="Replace the unfinished draft?"
-        message="The draft and its photo will be removed before starting the selected scenario. Saved assessments will remain."
+        message="The draft, its photo and household details will be removed before starting the selected scenario. Saved assessments will remain."
         confirm="Replace draft"
         onCancel={() => setReplacing(false)}
         onConfirm={() =>

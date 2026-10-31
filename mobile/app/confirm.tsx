@@ -3,6 +3,10 @@ import { useEffect, useState } from "react";
 import { Redirect, router } from "expo-router";
 import { usePreview } from "@/hooks/preview-context";
 import {
+  householdDetailsError,
+  normalizeHouseholdDetails,
+} from "@/domain/model";
+import {
   Button,
   Copy,
   Disclaimer,
@@ -13,6 +17,7 @@ import {
   Screen,
   Step,
 } from "@/components/ui";
+import { colors } from "@/components/theme";
 
 export default function ConfirmScreen() {
   const { state, create } = usePreview();
@@ -20,6 +25,8 @@ export default function ConfirmScreen() {
   const draft = state.draft;
   useEffect(() => setInvalid(false), [draft?.photo?.id]);
   if (!draft?.photo) return <Redirect href={draft ? "/capture" : "/"} />;
+  const details = normalizeHouseholdDetails(draft.householdContext);
+  const detailsError = householdDetailsError(draft.householdContext);
   return (
     <Screen>
       <Step number={2} label="Photo check" />
@@ -38,10 +45,28 @@ export default function ConfirmScreen() {
       <Panel>
         <Copy kind="eyebrow">LOOKING OUT FOR</Copy>
         <Copy>
-          {draft.profiles.join(" · ") || "Your household · General assessment"}
+          {draft.profiles.join(" · ") ||
+            (details
+              ? "No groups selected"
+              : "Your household · General assessment")}
         </Copy>
+        <Copy kind="eyebrow" style={{ textTransform: "uppercase" }}>
+          Household details
+        </Copy>
+        <Copy style={details ? undefined : { color: colors.muted }}>
+          {details || "No additional details"}
+        </Copy>
+        {!!detailsError && (
+          <Copy
+            accessibilityRole="alert"
+            accessibilityLiveRegion="polite"
+            style={{ color: colors.danger, fontWeight: "600" }}
+          >
+            {detailsError}
+          </Copy>
+        )}
         <Button
-          label="Change photo or profiles"
+          label="Edit photo or household details"
           variant="text"
           onPress={() => router.dismissTo("/capture")}
         />
@@ -55,7 +80,7 @@ export default function ConfirmScreen() {
       <Button
         label={apiEnabled ? "Create assessment" : "Create sample assessment"}
         icon="arrow"
-        disabled={invalid}
+        disabled={invalid || !!detailsError}
         onPress={() =>
           void create().then((a) => {
             if (a) router.replace(`/analysis/${a.id}`);

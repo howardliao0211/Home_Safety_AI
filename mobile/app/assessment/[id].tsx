@@ -70,8 +70,28 @@ function AssessmentScreen() {
           day: "numeric",
           month: "long",
         })}{" "}
-        · {assessment.profiles.join(" · ") || "General assessment"}
+        ·{" "}
+        {assessment.profiles.join(" · ") ||
+          (assessment.householdContext
+            ? "No groups selected"
+            : "General assessment")}
       </Copy>
+      <View style={{ gap: 4 }}>
+        <Copy
+          kind="eyebrow"
+          accessibilityRole="header"
+          style={{ textTransform: "uppercase" }}
+        >
+          Household details
+        </Copy>
+        <Copy
+          style={
+            assessment.householdContext ? undefined : { color: colors.muted }
+          }
+        >
+          {assessment.householdContext || "No additional details"}
+        </Copy>
+      </View>
       <PreviewNotice />
       {total ? (
         <>

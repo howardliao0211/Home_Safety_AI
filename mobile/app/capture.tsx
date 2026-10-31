@@ -1,9 +1,15 @@
 import { apiEnabled } from "@/api/config";
-import { useState } from "react";
-import { Pressable, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Pressable, TextInput, View } from "react-native";
 import { Redirect, router } from "expo-router";
 import { useNavigation, usePreventRemove } from "expo-router/react-navigation";
-import { profiles } from "@/domain/model";
+import {
+  householdDetailsError,
+  householdDetailsLength,
+  isDraftDirty,
+  MAX_HOUSEHOLD_DETAILS,
+  profiles,
+} from "@/domain/model";
 import { usePreview } from "@/hooks/preview-context";
 import { PhotoInput } from "@/components/photo-input";
 import { Icon } from "@/components/icon";
@@ -16,15 +22,68 @@ import {
   Screen,
   Section,
   Step,
+  styles,
 } from "@/components/ui";
 import { colors } from "@/components/theme";
 
 export default function CaptureScreen() {
-  const { state, busy, editDraft, choosePhoto, discardDraft } = usePreview();
+  const {
+    state,
+    busy,
+    editDraft,
+    choosePhoto,
+    discardDraft,
+    saveDraftDetails,
+  } = usePreview();
   const navigation = useNavigation();
   const [leave, setLeave] = useState<(() => void) | null>(null);
   const draft = state.draft;
-  const dirty = !!draft?.photo || !!draft?.profiles.length;
+  // Local text is the source of truth while typing; storage may lag or fail.
+  const [details, setDetails] = useState(draft?.householdContext ?? "");
+  const detailsRef = useRef(details);
+  const saveVersion = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  // A discarded or submitted draft leaves this screen; a later draft starts blank.
+  useEffect(() => {
+    if (draft) return;
+    detailsRef.current = "";
+    setDetails("");
+  }, [draft]);
+  const [saveError, setSaveError] = useState("");
+  const detailsError = householdDetailsError(details);
+  const dirty =
+    !!draft && isDraftDirty({ ...draft, householdContext: details });
+  async function persistDetails(text: string) {
+    const version = ++saveVersion.current;
+    try {
+      await saveDraftDetails(text);
+      if (mounted.current && version === saveVersion.current) setSaveError("");
+      return true;
+    } catch (e) {
+      if (mounted.current && version === saveVersion.current)
+        setSaveError(
+          e instanceof Error
+            ? `Household details could not be saved. ${e.message}`
+            : "Household details could not be saved. Try again.",
+        );
+      return false;
+    }
+  }
+  function editDetails(text: string) {
+    detailsRef.current = text;
+    setDetails(text);
+    void persistDetails(text);
+  }
+  async function review() {
+    if (householdDetailsError(detailsRef.current)) return;
+    if (await persistDetails(detailsRef.current)) router.push("/confirm");
+  }
   usePreventRemove(dirty, ({ data }) =>
     setLeave(() => () => navigation.dispatch(data.action)),
   );
@@ -47,8 +106,8 @@ export default function CaptureScreen() {
       />
       <Section title="Who are you looking out for?">
         <Copy kind="small">
-          Optional. Choose everyone who lives here, or leave blank for a general
-          assessment.
+          Choose any groups that apply, and add details below if you’d like.
+          Both are optional.
         </Copy>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
           {profiles.map((profile) => {
@@ -94,13 +153,59 @@ export default function CaptureScreen() {
             );
           })}
         </View>
+        <View style={{ gap: 8 }}>
+          <Copy kind="small" style={{ fontWeight: "600", color: colors.ink }}>
+            Household details (optional)
+          </Copy>
+          <TextInput
+            accessibilityLabel="Household details (optional)"
+            accessibilityHint="Ages, mobility needs, or pets in your household."
+            aria-invalid={!!detailsError}
+            placeholder="For example, a 2-year-old, an adult who uses a walker, or two indoor cats."
+            placeholderTextColor={colors.muted}
+            multiline
+            value={details}
+            onChangeText={editDetails}
+            style={[
+              styles.input,
+              { maxHeight: 240 },
+              detailsError
+                ? { borderColor: colors.danger, borderWidth: 2 }
+                : null,
+            ]}
+          />
+          <Copy kind="small">
+            {householdDetailsLength(details).toLocaleString("en-AU")} /{" "}
+            {MAX_HOUSEHOLD_DETAILS.toLocaleString("en-AU")} characters
+          </Copy>
+          {!!detailsError && (
+            <Copy
+              kind="small"
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+              style={{ color: colors.danger, fontWeight: "600" }}
+            >
+              {detailsError}
+            </Copy>
+          )}
+          {!!saveError && (
+            <Copy
+              kind="small"
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+              style={{ color: colors.danger }}
+            >
+              {saveError}
+            </Copy>
+          )}
+        </View>
       </Section>
       <View style={{ gap: 8 }}>
         <Button
           label="Review photo"
           icon="arrow"
-          disabled={!draft.photo}
-          onPress={() => router.push("/confirm")}
+          disabled={!draft.photo || !!detailsError}
+          onPress={() => void review()}
         />
         {!draft.photo && (
           <Copy kind="small">Choose a photo or sample to continue.</Copy>
@@ -124,8 +229,8 @@ export default function CaptureScreen() {
         title="Discard this submission?"
         message={
           apiEnabled
-            ? "This unsent draft and its photo will be removed. Earlier assessments remain saved."
-            : "This draft and its photo will be removed. Your earlier assessments will stay on this device."
+            ? "This unsent draft, its photo and household details will be removed. Earlier assessments remain saved."
+            : "This draft, its photo and household details will be removed. Your earlier assessments will stay on this device."
         }
         confirm="Discard draft"
         onCancel={() => setLeave(null)}

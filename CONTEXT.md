@@ -37,6 +37,12 @@ a category, severity, evidence, recommendation, uncertainty, and status;
 **Household profile**: Optional context identifying household members whose
 needs may affect the assessment, such as an older adult, child, infant, or pet.
 
+**Household details**: Optional free text (up to 3,000 characters) describing the
+household, such as ages, mobility needs or pets. Trimmed and frozen into one
+assessment at creation; supplied to the model as context separate from household
+profiles, never as instructions. Stored as `household_context` /
+`householdContext`.
+
 **Finding chat**: A saved, text-only advisory conversation belonging to one finding.
 Each answer uses the original room photo, household context, current finding, earlier
 chat and completed historical discussion. Chat never changes findings or status.

@@ -38,6 +38,8 @@ export type RemoteAssessment = RemoteOperation & {
   created_at: string;
   photo: RemotePhoto;
   profiles: Profile[];
+  /** Absent only on records saved before the field existed. */
+  household_context?: string;
   summary: string | null;
   findings: RemoteFinding[];
 };
@@ -65,6 +67,8 @@ export function fromServer(
     title: remote.title || undefined,
     createdAt: remote.created_at,
     profiles: remote.profiles,
+    householdContext:
+      remote.household_context ?? cached?.householdContext ?? "",
     status: remote.status,
     attempts: remote.attempts,
     error: remote.error || undefined,
@@ -271,6 +275,7 @@ export class BackendClient {
     const form = new FormData();
     form.append("assessment_id", assessment.id);
     form.append("profiles", JSON.stringify(assessment.profiles));
+    form.append("household_context", assessment.householdContext ?? "");
     await this.appendPhoto(form, assessment.photo);
     return this.assessment("/v1/assessments", assessment, {
       method: "POST",

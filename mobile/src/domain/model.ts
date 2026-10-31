@@ -48,7 +48,27 @@ export type Photo = {
   remote?: { assessmentId: string; photoId: string };
   serverUploaded?: boolean;
 };
-export type Draft = { photo?: Photo; profiles: Profile[]; scenario: Scenario };
+export type Draft = {
+  photo?: Photo;
+  profiles: Profile[];
+  scenario: Scenario;
+  /** Editable, untrimmed text. Missing on older drafts, which means blank. */
+  householdContext?: string;
+};
+export const MAX_HOUSEHOLD_DETAILS = 3000;
+export const normalizeHouseholdDetails = (text = "") => text.trim();
+/** Counts code points, matching the server's Python string length. */
+export const householdDetailsLength = (text = "") =>
+  [...normalizeHouseholdDetails(text)].length;
+export function householdDetailsError(text = "") {
+  return householdDetailsLength(text) > MAX_HOUSEHOLD_DETAILS
+    ? "Keep household details to 3,000 characters or fewer."
+    : undefined;
+}
+export const isDraftDirty = (draft: Draft) =>
+  !!draft.photo ||
+  draft.profiles.length > 0 ||
+  !!normalizeHouseholdDetails(draft.householdContext);
 export type FindingStatus = "open" | "resolved" | "dismissed";
 export type OperationStatus = "ready" | "running" | "failed" | "complete";
 export type Submission = {
@@ -92,6 +112,8 @@ export type Assessment = {
   createdAt: string;
   photo: Photo;
   profiles: Profile[];
+  /** Normalized and frozen at creation. Missing on older records, which means blank. */
+  householdContext?: string;
   scenario: Scenario;
   status: OperationStatus;
   attempts: number;
@@ -116,11 +138,14 @@ export const makeId = () =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 export function createAssessment(draft: Draft): Assessment {
   if (!draft.photo) throw new Error("Choose a room photo first.");
+  const invalid = householdDetailsError(draft.householdContext);
+  if (invalid) throw new Error(invalid);
   return {
     id: makeId(),
     createdAt: new Date().toISOString(),
     photo: draft.photo,
     profiles: [...draft.profiles],
+    householdContext: normalizeHouseholdDetails(draft.householdContext),
     scenario: draft.scenario,
     status: "ready",
     attempts: 0,

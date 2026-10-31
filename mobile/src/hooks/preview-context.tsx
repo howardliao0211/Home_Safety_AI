@@ -332,6 +332,13 @@ function usePreviewState(session: Session) {
         ...s,
         draft: change(s.draft ?? { profiles: [], scenario: s.nextScenario }),
       })),
+    // Typing bypasses `act` so keystrokes are never dropped while another action runs.
+    // The serialized store applies writes in order; failures reject without publishing.
+    // A save that lands after discard or creation must not revive the draft.
+    saveDraftDetails: (householdContext: string) =>
+      repository.update((s) =>
+        s.draft ? { ...s, draft: { ...s.draft, householdContext } } : s,
+      ),
     choosePhoto: (photo: Photo) =>
       act(async () => {
         const retained = await retainPhoto(photo);
@@ -353,6 +360,8 @@ function usePreviewState(session: Session) {
       }),
     create: () =>
       act(async () => {
+        // Include household-detail edits still being written.
+        await repository.drained();
         if (!repository.state.draft)
           throw new Error("Choose a photo to start an assessment.");
         const assessment = createAssessment(repository.state.draft);
