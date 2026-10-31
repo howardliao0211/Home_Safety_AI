@@ -134,7 +134,7 @@ flowchart LR
 - **Highlights:** independent, durable attempts use SAM segmentation without
   blocking the main assessment or sibling findings.
 - **Deployment:** Docker, Terraform, Artifact Registry, and Cloud Run provide the
-  GCP release path in `us-central1`.
+  GCP release path in Sydney (`australia-southeast1`) by default.
 
 ## Prerequisites
 

@@ -25,6 +25,7 @@ class DestroyTests(unittest.TestCase):
         service="home-safety-demo",
         fail_delete=False,
         replanned_changes=None,
+        command="destroy",
     ):
         calls = []
 
@@ -50,7 +51,7 @@ class DestroyTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, stdout="oauth-token")
 
         with (
-            patch.object(sys, "argv", ["terraform-gcp.py", "destroy", *extra]),
+            patch.object(sys, "argv", ["terraform-gcp.py", command, *extra]),
             patch.object(terraform.subprocess, "run", side_effect=run),
             patch.object(terraform, "backup_state"),
             patch.object(Path, "is_file", return_value=True),
@@ -182,6 +183,64 @@ class DestroyTests(unittest.TestCase):
                 status, calls = self.execute([argument])
                 self.assertEqual(status, 1)
                 self.assertEqual(calls, [])
+
+
+class RegionTeardownTests(DestroyTests):
+    def regional(self, address, before=None):
+        kind, name = address.split(".")
+        return {
+            "address": address,
+            "type": kind,
+            "change": {"actions": ["delete"], "before": before or {"id": name}},
+        }
+
+    def test_region_teardown_targets_only_regional_resources_in_order(self):
+        changes = [
+            self.regional("google_cloud_tasks_queue.annotations", {"id": "q", "name": "q1"}),
+            self.regional("google_cloud_scheduler_job.annotation_recovery[0]", {"name": "job"}),
+            self.regional("google_storage_bucket.photos"),
+        ]
+        status, calls = self.execute(
+            ["-var-file=/private/deploy.tfvars.json"],
+            confirmation="rebuild",
+            changes=changes,
+            command="region-teardown",
+        )
+        self.assertEqual(status, 0)
+        plan = next(c for c in calls if "plan" in c)
+        self.assertIn("-target=google_storage_bucket.photos", plan)
+        self.assertFalse(any("secret" in a or "identity" in a for a in plan))
+        order = [
+            next(i for i, c in enumerate(calls) if c[:3] == ["gcloud", "tasks", "queues"]),
+            next(i for i, c in enumerate(calls) if c[:3] == ["gcloud", "scheduler", "jobs"]),
+            next(i for i, c in enumerate(calls) if c[:4] == ["gcloud", "run", "services", "delete"]),
+            next(i for i, c in enumerate(calls) if "apply" in c),
+        ]
+        self.assertEqual(order, sorted(order))
+        self.assertIn("--region=australia-southeast1", calls[order[2]])
+
+    def test_region_teardown_refuses_plans_that_touch_shared_resources(self):
+        for address in (
+            "google_secret_manager_secret.backend",
+            "google_identity_platform_config.accounts",
+            "google_service_account.backend",
+        ):
+            with self.subTest(address=address):
+                status, calls = self.execute(
+                    [],
+                    confirmation="rebuild",
+                    changes=[self.regional(address)],
+                    command="region-teardown",
+                )
+                self.assertEqual(status, 1)
+                self.assertFalse(any("apply" in c or "delete" in c for c in calls))
+
+    def test_region_teardown_requires_its_own_confirmation(self):
+        status, calls = self.execute(
+            [], confirmation="destroy", changes=[], command="region-teardown"
+        )
+        self.assertEqual(status, 1)
+        self.assertFalse(any("apply" in c for c in calls))
 
 
 if __name__ == "__main__":

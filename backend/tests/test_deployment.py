@@ -74,15 +74,15 @@ def test_smoke_signin_failure_does_not_relay_credentials(tmp_path, monkeypatch):
 def config():
     return deploy.Config(
         project_id="test-project",
-        region="us-central1",
+        region="australia-southeast1",
         service_name="test-service",
-        repository="us-central1-docker.pkg.dev/test-project/home-safety",
+        repository="australia-southeast1-docker.pkg.dev/test-project/home-safety",
         service_account="runtime@test-project.iam.gserviceaccount.com",
         photos_bucket="test-photos",
         database_id="(default)",
         groq_secret="groq-secret",
         annotation_worker_url="https://test.run.app",
-        annotation_tasks_queue="projects/test-project/locations/us-central1/queues/highlights",
+        annotation_tasks_queue="projects/test-project/locations/australia-southeast1/queues/highlights",
     )
 
 
@@ -204,6 +204,8 @@ class FakeRelease(deploy.Deployer):
         }
 
     def gcloud(self, *args, **kwargs):
+        if kwargs.get("regional"):
+            args = (*args, f"--region={self.config.region}")
         self.commands.append(args)
         if args[:2] == ("run", "deploy"):
             tag = next(a.split("=", 1)[1] for a in args if a.startswith("--tag="))
@@ -316,7 +318,7 @@ def test_muse_release_pins_key_and_wires_durable_highlighting(config):
     configured = replace(
         config,
         muse_secret="muse-secret",
-        annotation_tasks_queue="projects/test-project/locations/us-central1/queues/highlights",
+        annotation_tasks_queue="projects/test-project/locations/australia-southeast1/queues/highlights",
         annotation_worker_url="https://test.run.app",
     )
     release = FakeRelease(configured)
@@ -407,3 +409,45 @@ def test_phone_env_failure_preserves_previous_frontend_settings(config, tmp_path
     with pytest.raises(deploy.DeploymentError, match="Injected health failure"):
         runner.configure_phone(env_file)
     assert env_file.read_text() == original
+
+
+def test_release_runs_in_the_configured_region_with_its_registry_and_queue(config):
+    from dataclasses import replace
+
+    sydney = replace(
+        config,
+        muse_secret="muse-secret",
+        annotation_worker_url="https://test-service-123.australia-southeast1.run.app",
+    )
+    release = FakeRelease(sydney)
+    release.release(
+        model="muse-main",
+        provider="muse",
+        segmentation_model="sam-3.1",
+        image=sydney.repository + "/backend@sha256:" + "b" * 64,
+    )
+    command = next(c for c in release.commands if "deploy" in c)
+    assert "--region=australia-southeast1" in command
+    assert any(
+        item.startswith("--image=australia-southeast1-docker.pkg.dev/") for item in command
+    )
+    environment = next(item for item in command if item.startswith("--set-env-vars="))
+    assert "/locations/australia-southeast1/queues/" in environment
+    assert (
+        "ANNOTATION_WORKER_URL=https://test-service-123.australia-southeast1.run.app"
+        in environment
+    )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("repository", "us-central1-docker.pkg.dev/test-project/home-safety"),
+        ("annotation_tasks_queue", "projects/test-project/locations/us-central1/queues/q"),
+    ],
+)
+def test_config_rejects_dependencies_from_another_region(config, field, value):
+    from dataclasses import asdict
+
+    with pytest.raises(deploy.DeploymentError, match="not in region australia-southeast1"):
+        deploy.Config(**{**asdict(config), field: value})

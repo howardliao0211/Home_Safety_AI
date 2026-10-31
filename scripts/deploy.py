@@ -18,6 +18,47 @@ PYTHON = ROOT / "backend/.venv/bin/python"
 VARIABLES = ROOT / "deploy/terraform/deploy.tfvars.json"
 
 
+def state_file():
+    return ROOT / "deploy/terraform/terraform.tfstate"
+
+# Resources whose location identifies the deployed region.
+REGIONAL_TYPES = {
+    "google_firestore_database": "location_id",
+    "google_storage_bucket": "location",
+    "google_cloud_tasks_queue": "location",
+    "google_artifact_registry_repository": "location",
+}
+
+
+def default_region():
+    """The Terraform default, so the region is defined in one place."""
+    text = (ROOT / "deploy/terraform/variables.tf").read_text()
+    match = re.search(r'variable "region"\s*{[^}]*?default\s*=\s*"([a-z0-9-]+)"', text, re.DOTALL)
+    if not match:
+        raise RuntimeError("Could not read the default region from variables.tf.")
+    return match.group(1)
+
+
+def deployed_region():
+    """Region of regional resources in Terraform state, or None when there are none."""
+    state = state_file()
+    if not state.exists():
+        return None
+    regions = {
+        str(instance["attributes"].get(attribute, "")).lower()
+        for resource in json.loads(state.read_text()).get("resources", [])
+        if (attribute := REGIONAL_TYPES.get(resource.get("type")))
+        for instance in resource.get("instances", [])
+    } - {""}
+    if len(regions) > 1:
+        raise RuntimeError(
+            "Terraform state has regional resources in several regions: "
+            + ", ".join(sorted(regions))
+            + ". Finish the interrupted rebuild: deploy rebuild --region TARGET."
+        )
+    return next(iter(regions), None)
+
+
 def run(command, *, capture=False):
     if not capture:
         print(f"\n$ {shlex.join(map(str, command))}", flush=True)
@@ -32,6 +73,61 @@ class Deployment:
         account = [f"--account={args.account}"] if args.account else []
         self.terraform = [sys.executable, ROOT / "scripts/terraform-gcp.py", *account]
         self.backend = [PYTHON, ROOT / "scripts/deploy-gcp.py", *account]
+
+    def resolve_region(self):
+        """Explicit --region, then the saved generated input, then the Terraform default."""
+        saved = json.loads(VARIABLES.read_text()).get("region") if VARIABLES.exists() else None
+        self.region = getattr(self.args, "region", None) or saved or default_region()
+        return self.region
+
+    def check_region(self):
+        """A plain start never moves an existing deployment to another region."""
+        deployed = deployed_region()
+        if deployed and deployed != self.region:
+            raise RuntimeError(
+                f"The existing deployment is in {deployed}, but {self.region} is selected. "
+                f"Pass --region {deployed} to keep it, or run "
+                f"`deploy rebuild --region {self.region}` to discard it and rebuild."
+            )
+
+    def announce(self):
+        print(
+            f"Target: project {self.project()}, region {self.region}.",
+            flush=True,
+        )
+
+    @staticmethod
+    def project():
+        if state_file().exists():
+            for resource in json.loads(state_file().read_text()).get("resources", []):
+                for instance in resource.get("instances", []):
+                    project = instance["attributes"].get("project")
+                    if project:
+                        return project
+        return "home-safety-ai (Terraform default)"
+
+    def rebuild(self):
+        """Discard the deployment in its current region, then deploy in the target.
+
+        Rerunning resumes: teardown is skipped once no source resources remain.
+        """
+        source = deployed_region()
+        if source and source != self.region:
+            print(
+                f"Source: project {self.project()}, region {source}, service "
+                f"home-safety-demo. Target region: {self.region}.",
+                flush=True,
+            )
+            # Plan the teardown against the source region, never the target.
+            self.save_variables(region=source)
+            run([*self.terraform, "init"])
+            run([*self.terraform, "region-teardown", f"-var-file={VARIABLES}"])
+            if deployed_region() == source:
+                raise RuntimeError(
+                    f"Resources remain in {source}. Inspect the state and rerun rebuild."
+                )
+        # The old worker origin belongs to the former service; derive a new one.
+        self.save_variables(region=self.region, annotation_worker_url="")
 
     def save_variables(self, **updates):
         values = json.loads(VARIABLES.read_text()) if VARIABLES.exists() else {}
@@ -55,6 +151,11 @@ class Deployment:
             raise RuntimeError(
                 "Local Terraform state is missing. Restore its private backup before stop."
             )
+        # Tear down where the deployment is, never the current default region.
+        deployed = deployed_region()
+        if deployed:
+            print(f"Stopping project {self.project()}, region {deployed}.", flush=True)
+            self.save_variables(region=deployed)
         run([*self.terraform, "init"])
         command = [*self.terraform, "destroy"]
         if VARIABLES.exists():
@@ -78,18 +179,26 @@ class Deployment:
         # Preserve recovery on repeated deployments; finish refreshes its URL.
         worker_url = ""
         saved_state = {}
-        state = ROOT / "deploy/terraform/terraform.tfstate"
+        state = state_file()
+        region = getattr(self, "region", None)
         if state.exists():
             saved_state = json.loads(state.read_text())
-            if saved_state.get("resources"):
+            # Only a worker in this region may receive work; never reuse another region's.
+            if saved_state.get("resources") and deployed_region() in (None, region):
                 if "deployment_config" in saved_state.get("outputs", {}):
                     config = self.output("deployment_config")
-                    worker_url = config.get("annotation_worker_url", "")
+                    if config.get("region") in (None, region) or region is None:
+                        worker_url = config.get("annotation_worker_url", "")
                 elif VARIABLES.exists():
                     # Older or partially applied state may not have this output yet.
                     # Keep the saved target until apply can populate the output.
-                    worker_url = json.loads(VARIABLES.read_text()).get("annotation_worker_url", "")
-        self.save_variables(annotation_worker_url=worker_url, adopt_existing_identity_config=True)
+                    saved = json.loads(VARIABLES.read_text())
+                    if saved.get("region") in (None, region) or region is None:
+                        worker_url = saved.get("annotation_worker_url", "")
+        updates = {"annotation_worker_url": worker_url, "adopt_existing_identity_config": True}
+        if region:
+            updates["region"] = region
+        self.save_variables(**updates)
         # GCP reserves deleted queue/database IDs. Allocate fresh IDs only when
         # the resource is absent from state; retain existing resources and data.
         for resource_type, variable, prefix in (
@@ -174,10 +283,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=["start", "stop"],
+        choices=["start", "stop", "rebuild"],
         nargs="?",
         default="start",
-        help="start deploys (default); stop destroys managed resources and stored data",
+        help="start deploys (default); stop destroys managed resources and stored data; "
+        "rebuild discards the deployment in its current region and deploys in --region",
+    )
+    parser.add_argument(
+        "--region",
+        help="GCP region for start/rebuild. Default: the saved region, else the Terraform default",
     )
     parser.add_argument("--stage", choices=["all", "bootstrap", "finish"])
     parser.add_argument("--model", help="Muse model ID; defaults to MUSE_MAIN_MODEL in root .env")
@@ -188,14 +302,18 @@ def main():
         help="Install mobile dependencies and run the tunnel after finish",
     )
     args = parser.parse_args()
-    if args.command == "stop" and (args.stage or args.start_expo or args.model):
-        parser.error("--stage, --start-expo and --model apply only to start")
+    if args.command == "stop" and (args.stage or args.start_expo or args.model or args.region):
+        parser.error("--stage, --start-expo, --model and --region apply only to start/rebuild")
+    if args.command == "rebuild" and (not args.region or args.stage):
+        parser.error("rebuild requires --region and runs every stage")
+    if args.region and not re.fullmatch(r"[a-z]+-[a-z]+[0-9]", args.region):
+        parser.error("--region must be a GCP region such as australia-southeast1")
     args.stage = args.stage or "all"
     os.umask(0o077)
     lock = None
     try:
         prerequisites = ["terraform", "gcloud"]
-        if args.command == "start":
+        if args.command in {"start", "rebuild"}:
             prerequisites.extend(["uv", "docker"])
         for executable in prerequisites:
             if not shutil.which(executable):
@@ -236,8 +354,14 @@ def main():
             raise RuntimeError("Set MUSE_API_KEY in root .env or your environment.")
         run([*deployment.backend, "preflight"])
         run([*deployment.backend, "build"])
+        deployment.resolve_region()
+        if args.command == "start":
+            deployment.check_region()
+        deployment.announce()
         run([*deployment.terraform, "init"])
         run([*deployment.terraform, "validate"])
+        if args.command == "rebuild":
+            deployment.rebuild()
         if args.stage in {"all", "bootstrap"}:
             deployment.bootstrap()
         if args.stage in {"all", "finish"}:
@@ -260,6 +384,14 @@ def main():
         if args.command == "stop":
             print(
                 "Teardown may be incomplete. Inspect the plan/state and rerun stop to finish.",
+                file=sys.stderr,
+            )
+        elif args.command == "rebuild":
+            print(
+                f"Rerun `deploy rebuild --region {args.region}` to resume: it skips teardown once "
+                "the source region is empty, then continues the target deployment.\n"
+                "Source data cannot be restored after teardown; failures never remove "
+                "the new deployment automatically.",
                 file=sys.stderr,
             )
         else:

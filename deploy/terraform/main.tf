@@ -34,7 +34,8 @@ resource "google_service_account" "backend" {
 }
 
 resource "google_storage_bucket" "photos" {
-  name                        = "${var.project_id}-demo-photos"
+  # Region in the name: a rebuild never waits on reuse of a deleted bucket name.
+  name                        = "${var.project_id}-photos-${var.region}"
   location                    = var.region
   storage_class               = "STANDARD"
   uniform_bucket_level_access = true

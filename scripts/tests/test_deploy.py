@@ -386,5 +386,122 @@ class DeploymentTests(unittest.TestCase):
                 release.assert_called_once()
 
 
+class RegionTests(unittest.TestCase):
+    def deployment(self, root, region=None, saved=None, state_region=None):
+        terraform = root / "deploy/terraform"
+        terraform.mkdir(parents=True, exist_ok=True)
+        (terraform / "variables.tf").write_text(
+            'variable "region" {\n  type    = string\n  default = "australia-southeast1"\n}\n'
+        )
+        if saved:
+            (terraform / "deploy.tfvars.json").write_text(json.dumps({"region": saved}))
+        if state_region:
+            (terraform / "terraform.tfstate").write_text(
+                json.dumps(
+                    {
+                        "resources": [
+                            {
+                                "type": "google_firestore_database",
+                                "instances": [
+                                    {"attributes": {"location_id": state_region, "project": "p"}}
+                                ],
+                            }
+                        ]
+                    }
+                )
+            )
+        args = argparse.Namespace(account=None, model="m", start_expo=False, region=region)
+        return deploy.Deployment(args)
+
+    def run_in(self, root, action):
+        with (
+            patch.object(deploy, "ROOT", root),
+            patch.object(deploy, "VARIABLES", root / "deploy/terraform/deploy.tfvars.json"),
+        ):
+            return action()
+
+    def test_explicit_region_wins_over_saved_inputs_then_default(self):
+        cases = [
+            ("us-central1", "europe-west1", "us-central1"),
+            (None, "us-central1", "us-central1"),
+            (None, None, "australia-southeast1"),
+        ]
+        for explicit, saved, expected in cases:
+            with self.subTest(explicit=explicit, saved=saved), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                deployment = self.deployment(root, explicit, saved)
+                self.assertEqual(self.run_in(root, deployment.resolve_region), expected)
+
+    def test_start_never_moves_an_existing_deployment(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            deployment = self.deployment(root, state_region="us-central1")
+            self.run_in(root, deployment.resolve_region)  # Default is now Sydney.
+            with self.assertRaisesRegex(RuntimeError, "deploy rebuild --region"):
+                self.run_in(root, deployment.check_region)
+            same = self.deployment(root, region="us-central1", state_region="us-central1")
+            self.run_in(root, same.resolve_region)
+            self.run_in(root, same.check_region)
+
+    def test_bootstrap_never_reuses_another_regions_worker_url(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            deployment = self.deployment(root, region="australia-southeast1")
+            state = root / "deploy/terraform/terraform.tfstate"
+            state.write_text(
+                json.dumps(
+                    {
+                        "resources": [{"type": "google_service_account", "instances": [{}]}],
+                        "outputs": {"deployment_config": {"value": {}}},
+                    }
+                )
+            )
+            us = {"region": "us-central1", "annotation_worker_url": "https://us.run.app"}
+            with (
+                patch.object(
+                    deployment,
+                    "output",
+                    side_effect=[
+                        us,
+                        {
+                            "project_id": "p",
+                            "region": "australia-southeast1",
+                            "service_name": "home-safety-demo",
+                        },
+                    ],
+                ),
+                patch.object(deployment, "save_variables") as save,
+                patch.object(deployment, "apply"),
+                patch.object(deployment, "release"),
+                patch.object(deploy, "run", return_value="123"),
+            ):
+                self.run_in(root, deployment.resolve_region)
+                self.run_in(root, deployment.bootstrap)
+            first = save.call_args_list[0].kwargs
+            self.assertEqual(first["annotation_worker_url"], "")
+            self.assertEqual(first["region"], "australia-southeast1")
+            # The provisional origin is derived from the Sydney service identity.
+            self.assertEqual(
+                save.call_args_list[-1].kwargs["annotation_worker_url"],
+                "https://home-safety-demo-123.australia-southeast1.run.app",
+            )
+
+    def test_mixed_region_state_requires_finishing_the_rebuild(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self.deployment(root, state_region="us-central1")
+            state = root / "deploy/terraform/terraform.tfstate"
+            data = json.loads(state.read_text())
+            data["resources"].append(
+                {
+                    "type": "google_cloud_tasks_queue",
+                    "instances": [{"attributes": {"location": "australia-southeast1"}}],
+                }
+            )
+            state.write_text(json.dumps(data))
+            with self.assertRaisesRegex(RuntimeError, "rebuild"):
+                self.run_in(root, deploy.deployed_region)
+
+
 if __name__ == "__main__":
     unittest.main()

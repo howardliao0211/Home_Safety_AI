@@ -98,6 +98,117 @@ def remove_cloud_run(plan, account, env):
         )
 
 
+# Regional resources and the bindings that reference them. A region rebuild
+# removes only these; the project, service account, model secrets, Identity
+# Platform config and project-wide IAM are shared and retained.
+REGIONAL = (
+    "google_cloud_scheduler_job.annotation_recovery",
+    "google_cloud_tasks_queue.annotations",
+    "google_firestore_field.annotation_dispatch",
+    "google_firestore_field.chat_dispatch",
+    "google_project_iam_member.backend_database",
+    "google_firestore_database.assessments",
+    "google_storage_bucket_iam_member.backend_photos",
+    "google_storage_bucket.photos",
+    "google_artifact_registry_repository.backend",
+)
+
+
+def without_field_resets(terraform, plan_command, changes, env):
+    """Drop Firestore field resets whose database is deleted; regenerate the plan.
+
+    Resetting field indexes can hang for hours, and the whole database is being
+    deleted, so no reset is needed. Returns the regenerated changes.
+    """
+    databases = {
+        c["change"]["before"]["id"]
+        for c in changes
+        if c.get("type") == "google_firestore_database" and c["change"]["actions"] == ["delete"]
+    }
+    fields = [
+        c["address"]
+        for c in changes
+        if c.get("type") == "google_firestore_field"
+        and c["change"]["actions"] == ["delete"]
+        and any(c["change"]["before"]["id"].startswith(db + "/") for db in databases)
+    ]
+    if not fields:
+        return changes
+    subprocess.run([*terraform, "state", "rm", *fields], env=env, check=True)
+    # State serial changed: regenerate the plan, never apply the stale one.
+    subprocess.run(plan_command, env=env, check=True)
+    updated = inspect_plan(terraform, plan_command[-1].split("=", 1)[1], env)
+    reviewed = {c["address"] for c in changes if c["change"]["actions"] == ["delete"]}
+    if any(
+        c["change"]["actions"] != ["no-op"]
+        and (c["change"]["actions"] != ["delete"] or c["address"] not in reviewed)
+        for c in updated
+    ):
+        raise RuntimeError("Teardown plan changed beyond reviewed deletions; rerun to review it.")
+    return updated
+
+
+def pause_dispatch(plan, account, env):
+    """Stop source task delivery and recovery before the service goes away."""
+    variables = plan["variables"]
+    flags = [f"--location={variables['region']['value']}", f"--project={variables['project_id']['value']}", "--quiet"]
+    if account:
+        flags.append(f"--account={account}")
+    for change in plan.get("resource_changes", []):
+        before = change["change"].get("before") or {}
+        if change.get("type") == "google_cloud_tasks_queue" and before.get("name"):
+            subprocess.run(["gcloud", "tasks", "queues", "pause", before["name"], *flags], env=env, check=True)
+        if change.get("type") == "google_cloud_scheduler_job" and before.get("name"):
+            subprocess.run(["gcloud", "scheduler", "jobs", "pause", before["name"], *flags], env=env, check=True)
+
+
+def region_teardown(terraform, extra, account, env):
+    """Remove one region's deployment and data while keeping shared resources."""
+    plan_command = [
+        *terraform,
+        "plan",
+        "-destroy",
+        *extra,
+        *(f"-target={address}" for address in REGIONAL),
+        "-out=region-teardown.tfplan",
+    ]
+    subprocess.run(plan_command, env=env, check=True)
+    changes = inspect_plan(terraform, "region-teardown.tfplan", env)
+    plan = read_plan(terraform, "region-teardown.tfplan", env)
+    deleted = [c for c in changes if c["change"]["actions"] != ["no-op"]]
+    outside = [
+        c["address"]
+        for c in deleted
+        if c["change"]["actions"] != ["delete"]
+        or not c["address"].split("[")[0].startswith(REGIONAL)
+    ]
+    if outside:
+        raise RuntimeError(
+            "The region teardown plan touches shared resources: " + ", ".join(outside)
+        )
+    region = plan["variables"]["region"]["value"]
+    project = plan["variables"]["project_id"]["value"]
+    print(
+        f"Region teardown: project {project}, region {region}. Cloud Run, regional "
+        "resources and ALL their assessment data and photos are deleted. Model secrets, "
+        "Identity Platform accounts and the service account are kept.",
+        flush=True,
+    )
+    subprocess.run([*terraform, "show", "region-teardown.tfplan"], env=env, check=True)
+    if input(f"Type rebuild to remove the {region} deployment and its data: ") != "rebuild":
+        raise RuntimeError("Region teardown cancelled.")
+    backup_state()
+    try:
+        pause_dispatch(plan, account, env)
+        remove_cloud_run(plan, account, env)
+        without_field_resets(terraform, plan_command, changes, env)
+        return subprocess.run(
+            [*terraform, "apply", "region-teardown.tfplan"], env=env, check=False
+        ).returncode
+    finally:
+        backup_state()
+
+
 def teardown(terraform, extra, account, env):
     print(
         "Destroy removes persistent assessment data and photo objects. The external demo-token secret remains.",
@@ -113,34 +224,7 @@ def teardown(terraform, extra, account, env):
     backup_state()
     try:
         remove_cloud_run(plan, account, env)
-        databases = {
-            c["change"]["before"]["id"]
-            for c in changes
-            if c.get("type") == "google_firestore_database" and c["change"]["actions"] == ["delete"]
-        }
-        fields = [
-            c["address"]
-            for c in changes
-            if c.get("type") == "google_firestore_field"
-            and c["change"]["actions"] == ["delete"]
-            and any(c["change"]["before"]["id"].startswith(db + "/") for db in databases)
-        ]
-        if fields:
-            # Resetting field indexes can hang for hours. Their entire database is
-            # being deleted, so no field reset is needed. Keep a recoverable backup.
-            subprocess.run([*terraform, "state", "rm", *fields], env=env, check=True)
-            # State serial changed: regenerate the plan, never apply the stale one.
-            subprocess.run(plan_command, env=env, check=True)
-            updated = inspect_plan(terraform, "destroy.tfplan", env)
-            reviewed = {c["address"] for c in changes if c["change"]["actions"] == ["delete"]}
-            if any(
-                c["change"]["actions"] != ["no-op"]
-                and (c["change"]["actions"] != ["delete"] or c["address"] not in reviewed)
-                for c in updated
-            ):
-                raise RuntimeError(
-                    "Teardown plan changed beyond reviewed deletions; rerun destroy to review it."
-                )
+        without_field_resets(terraform, plan_command, changes, env)
         return subprocess.run([*terraform, "apply", "destroy.tfplan"], env=env).returncode
     finally:
         backup_state()
@@ -225,6 +309,7 @@ def main() -> int:
             "plan",
             "apply",
             "destroy",
+            "region-teardown",
             "validate",
             "fmt",
             "output",
@@ -238,7 +323,9 @@ def main() -> int:
     try:
         if command in {"plan", "apply"}:
             require_current_image()
-        if command == "destroy" and not (DIRECTORY / "terraform.tfstate").is_file():
+        if command in {"destroy", "region-teardown"} and not (
+            DIRECTORY / "terraform.tfstate"
+        ).is_file():
             raise RuntimeError(
                 "Local Terraform state is missing. Restore its private backup before teardown."
             )
@@ -246,7 +333,7 @@ def main() -> int:
             raise RuntimeError(
                 "Apply requires one reviewed saved plan: plan -out=phone.tfplan, then apply phone.tfplan."
             )
-        if command == "destroy" and any(
+        if command in {"destroy", "region-teardown"} and any(
             not arg.startswith("-var-file=") or not arg.removeprefix("-var-file=") for arg in extra
         ):
             raise RuntimeError(
@@ -298,6 +385,8 @@ def main() -> int:
             ).returncode
         if command == "destroy":
             return teardown(terraform, extra, args.account, env)
+        if command == "region-teardown":
+            return region_teardown(terraform, extra, args.account, env)
         if command == "apply":
             # An externally created destroy plan must not bypass ordered teardown.
             changes = inspect_plan(terraform, extra[0], env)

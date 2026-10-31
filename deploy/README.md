@@ -5,7 +5,10 @@ For managed identity, emulator and native persistence setup, read
 identity provisioning must pass before release.
 
 The owner runs Expo Go on Android, the development computer runs the Expo tunnel,
-and FastAPI runs in project `home-safety-ai`, region `us-central1`. Keep resources
+and FastAPI runs in project `home-safety-ai`, region `australia-southeast1` (Sydney)
+by default. The region drives Cloud Run, Artifact Registry, Firestore, the photo
+bucket, Cloud Tasks and Scheduler; login, model secrets, the service account and
+project IAM are project-wide. Keep resources
 and data until explicit destroy. No automatic teardown is installed. Readiness
 requires cloud auth/storage/TLS checks; real Muse and phone journeys are exploratory.
 
@@ -105,6 +108,58 @@ through the wrapper to retain these settings. Do not run other release/rollback
 commands concurrently. `start` leaves resources/data in place on failure.
 It does not run exploratory phone/model journeys or local
 test suites; those remain separate checks below.
+
+### Region selection
+
+The deployment region is chosen in this order: `--region` on `start`/`rebuild`,
+then the `region` saved in `deploy.tfvars.json`, then the Terraform default
+(`australia-southeast1`). Both commands print the effective project and region
+before changing anything and save the region for later runs. A plain `start` never
+moves an existing deployment: if Terraform state holds regional resources in
+another region, it stops and names the rebuild command. Changing a default never
+destroys anything.
+
+### Rebuild in another region (destructive)
+
+```bash
+python3 scripts/deploy.py rebuild --region australia-southeast1
+```
+
+This discards the current region's deployment and **all of its assessment data,
+photos and chat**, then deploys fresh in the target region. It keeps Identity
+Platform accounts and settings, model secret resources and versions, the service
+account and project IAM. Phases:
+
+1. Records the source project/region from Terraform state and plans a reviewed,
+   targeted destroy of only the regional resources (`terraform-gcp.py
+   region-teardown`). The plan is refused if it would touch any shared resource.
+   Type `rebuild` to confirm; private state backups are written before and after.
+2. Pauses the source queue and Scheduler recovery job, deletes the source Cloud Run
+   service (in the source region), then applies the destroy.
+3. Saves the target region with an empty worker URL, so nothing can deliver to the
+   former service. Bootstrap allocates fresh Firestore and queue IDs and a bucket
+   named after the region (`home-safety-ai-photos-REGION`), derives a provisional
+   worker origin from the new service identity, builds and pushes to the target
+   registry and releases there. Finish verifies the real service URL, then updates
+   tasks, Scheduler and OIDC audiences together and writes the phone settings.
+
+Each Terraform apply still asks you to type `apply` after showing its plan. If
+anything fails, rerun the same `rebuild` command: teardown is skipped once the
+source region is empty, and the target deployment resumes. A failure never removes
+the new deployment automatically. Source data cannot be restored after phase 2;
+recovery means finishing the new deployment. `deploy-gcp.py rollback` only
+switches revisions within the configured region.
+
+After a rebuild:
+
+- Confirm locations: `python3 scripts/terraform-gcp.py output deployment_config`,
+  `gcloud run services list`, `gcloud tasks queues list --location=SOURCE` and
+  `gcloud scheduler jobs list --location=SOURCE` (the last two should be empty).
+- Restart Expo with a cleared cache so the phone picks up the new
+  `EXPO_PUBLIC_API_URL`: `npm --prefix mobile run start:tunnel -- --go --clear`.
+- On the phone, sign out (or reinstall Expo Go's project data) to drop cached
+  references to discarded assessments, then sign in with the existing account.
+  History starts empty; nothing is migrated.
 
 To stop, destroy all Terraform-managed infrastructure and the Cloud Run service:
 

@@ -99,7 +99,7 @@ professional home safety inspection.”
 - Mobile: Expo / React Native, with Android first for the physical-device demo.
   Account flows target Android and iOS; native device verification remains required.
 - Backend: FastAPI, including the assessment controller, in a Docker container
-  on GCP Cloud Run in `us-central1`, project `home-safety-ai`. Start with 1 CPU,
+  on GCP Cloud Run in Sydney (`australia-southeast1`), project `home-safety-ai`. Start with 1 CPU,
   2 GiB RAM, concurrency 8, minimum 0 and maximum 2 instances, and a 300-second
   request timeout. Container images live in Artifact Registry.
 - Model integration: Meta Muse is the demo provider, selected explicitly with
@@ -110,7 +110,9 @@ professional home safety inspection.”
   available for development through `MODEL_PROVIDER=groq`, `GROQ_API_KEY`, and
   `GROQ_MODEL`. Both implement the shared model adapter interface. There is no
   automatic provider fallback or model retry.
-- Persistence: Firestore Standard edition in Native mode, located in `us-central1`.
+- Persistence: Firestore Standard edition in Native mode, located in `australia-southeast1`.
+  Regional resources move only through a destructive rebuild (`deploy rebuild`),
+  which discards assessment data and keeps accounts and model secrets.
   FastAPI accesses Firestore using the dedicated Cloud Run service account; the mobile
   app accesses all assessment data through FastAPI. No SQLite or separate data disk.
   Local development uses the Firestore emulator and a GCS-compatible local service;

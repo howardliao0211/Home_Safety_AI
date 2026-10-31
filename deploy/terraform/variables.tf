@@ -5,9 +5,9 @@ variable "project_id" {
 }
 
 variable "region" {
-  description = "Region for Cloud Run, Artifact Registry, photos, and Firestore. Database location is immutable."
+  description = "Region for Cloud Run, Artifact Registry, photos, Firestore, Cloud Tasks and Scheduler. Database location is immutable: change regions with `deploy rebuild --region`."
   type        = string
-  default     = "us-central1"
+  default     = "australia-southeast1"
 }
 
 variable "adopt_existing_identity_config" {

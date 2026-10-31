@@ -47,6 +47,20 @@ class Config:
     annotation_tasks_queue: str = ""
     annotation_worker_url: str = ""
 
+    def __post_init__(self):
+        # Every regional dependency must be in the region Cloud Run is released to,
+        # so a stale input can never pair a new service with another region's queue.
+        if not self.repository.startswith(f"{self.region}-docker.pkg.dev/"):
+            raise DeploymentError(
+                f"Artifact Registry {self.repository} is not in region {self.region}."
+            )
+        if self.annotation_tasks_queue and f"/locations/{self.region}/" not in (
+            self.annotation_tasks_queue
+        ):
+            raise DeploymentError(
+                f"Cloud Tasks queue {self.annotation_tasks_queue} is not in region {self.region}."
+            )
+
 
 class Deployer:
     def __init__(self, config: Config, account: str | None = None):
