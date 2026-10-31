@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { Modal, View } from "react-native";
 import { router } from "expo-router";
 import { usePreview } from "@/hooks/preview-context";
-import { Button, Copy, styles } from "./ui";
+import { Button, Copy, Dialog, useDialogAction } from "./ui";
 
 export function NewAssessmentButton({
   label = "Assess a room",
@@ -13,6 +12,7 @@ export function NewAssessmentButton({
 }) {
   const { state, startDraft } = usePreview();
   const [choosing, setChoosing] = useState(false);
+  const action = useDialogAction(choosing);
   const begin = async (replace = false) => {
     const ok = await startDraft(replace);
     if (ok) {
@@ -28,35 +28,30 @@ export function NewAssessmentButton({
         variant={secondary ? "secondary" : "primary"}
         onPress={() => (state.draft ? setChoosing(true) : void begin())}
       />
-      <Modal
-        visible={choosing}
-        transparent
-        animationType="none"
-        onRequestClose={() => setChoosing(false)}
-      >
-        <View style={styles.backdrop}>
-          <View accessibilityViewIsModal role="dialog" style={styles.dialog}>
-            <Copy kind="heading" accessibilityRole="header">
-              You have an unfinished room
-            </Copy>
-            <Copy>
-              Resume your saved draft, or discard it to start a new room
-              assessment. Your previous assessments will stay saved.
-            </Copy>
-            <Button label="Resume draft" onPress={() => void begin()} />
-            <Button
-              label="Discard draft and start new"
-              variant="danger"
-              onPress={() => void begin(true)}
-            />
-            <Button
-              label="Cancel"
-              variant="text"
-              onPress={() => setChoosing(false)}
-            />
-          </View>
-        </View>
-      </Modal>
+      <Dialog visible={choosing} onRequestClose={() => setChoosing(false)}>
+        <Copy kind="heading" accessibilityRole="header">
+          You have an unfinished room
+        </Copy>
+        <Copy>
+          Resume your saved draft, or discard it to start a new room assessment.
+          Your previous assessments will stay saved.
+        </Copy>
+        {action.failure}
+        <Button
+          label="Resume draft"
+          onPress={() => action.run(() => void begin())}
+        />
+        <Button
+          label="Discard draft and start new"
+          variant="danger"
+          onPress={() => action.run(() => void begin(true))}
+        />
+        <Button
+          label="Cancel"
+          variant="text"
+          onPress={() => setChoosing(false)}
+        />
+      </Dialog>
     </>
   );
 }

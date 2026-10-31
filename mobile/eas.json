@@ -1,0 +1,41 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "environment": "preview",
+      "env": {
+        "EXPO_NO_DOTENV": "1",
+        "EXPO_PUBLIC_DATA_SOURCE": "api",
+        "EXPO_PUBLIC_API_URL": "https://home-safety-demo-k7coetxt6q-ts.a.run.app",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "home-safety-ai",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "home-safety-ai.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:1061356252510:web:351c381246e8204c1973cf"
+      },
+      "android": {
+        "buildType": "apk"
+      },
+      "ios": {
+        "buildConfiguration": "Release"
+      }
+    },
+    "production": {
+      "extends": "preview",
+      "distribution": "store",
+      "environment": "production",
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      }
+    },
+    "simulator": {
+      "extends": "preview",
+      "ios": {
+        "simulator": true
+      }
+    }
+  }
+}

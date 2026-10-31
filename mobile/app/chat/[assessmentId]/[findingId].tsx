@@ -352,7 +352,11 @@ function Chat({ aid, fid }: { aid: string; fid: string }) {
                 </View>
               )}
               {t.status === "failed" && (
-                <Notice title="Reply could not finish" tone="error">
+                <Notice
+                  title="Reply could not finish"
+                  tone="error"
+                  announce={false}
+                >
                   <Copy>{t.error}</Copy>
                 </Notice>
               )}

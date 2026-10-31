@@ -1,8 +1,16 @@
-import { useEffect, useState, type ReactNode } from "react";
 import {
+  isValidElement,
+  useEffect,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
+import {
+  AccessibilityInfo,
   ActivityIndicator,
   KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -151,15 +159,41 @@ export function Button({
     </Pressable>
   );
 }
+function textOf(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).filter(Boolean).join(" ");
+  if (isValidElement(node))
+    return textOf(
+      (node as ReactElement<{ children?: ReactNode }>).props.children,
+    );
+  return "";
+}
+let lastAnnouncement = { text: "", at: 0 };
+/** iOS has no live regions; announce once, skipping identical text announced moments ago (e.g. the same error shown in a dialog and behind it). */
+export function announce(text: string) {
+  if (Platform.OS !== "ios" || !text) return;
+  const now = Date.now();
+  if (text === lastAnnouncement.text && now - lastAnnouncement.at < 1500)
+    return;
+  lastAnnouncement = { text, at: now };
+  AccessibilityInfo.announceForAccessibility(text);
+}
 export function Notice({
   title,
   children,
   tone = "info",
+  announce: shouldAnnounce = tone !== "info",
 }: {
   title: string;
   children?: ReactNode;
   tone?: "info" | "error" | "success";
+  /** Announce on iOS when shown or changed. Defaults to error and success notices. */
+  announce?: boolean;
 }) {
+  const message = [title, textOf(children)].filter(Boolean).join(". ");
+  useEffect(() => {
+    if (shouldAnnounce) announce(message);
+  }, [shouldAnnounce, message]);
   return (
     <View
       accessibilityLiveRegion="polite"
@@ -333,6 +367,67 @@ export function PhotoView({
     </View>
   );
 }
+/** Modal dialog that stays within the safe area and scrolls when content (e.g. at large text sizes) is taller than the screen. */
+export function Dialog({
+  visible,
+  onRequestClose,
+  children,
+}: {
+  visible: boolean;
+  onRequestClose: () => void;
+  children: ReactNode;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="none"
+      onRequestClose={onRequestClose}
+    >
+      <View
+        style={[
+          styles.backdrop,
+          {
+            paddingTop: insets.top + 24,
+            paddingBottom: insets.bottom + 24,
+            paddingLeft: insets.left + 24,
+            paddingRight: insets.right + 24,
+          },
+        ]}
+      >
+        <View accessibilityViewIsModal role="dialog" style={styles.dialog}>
+          <ScrollView
+            style={{ flexGrow: 0, flexShrink: 1 }}
+            contentContainerStyle={styles.dialogContent}
+          >
+            {children}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+/** Shows a failed action's error inside an open dialog, once the user has tried it. */
+export function useDialogAction(visible: boolean) {
+  const { error, busy } = usePreview();
+  const [attempted, setAttempted] = useState(false);
+  useEffect(() => setAttempted(false), [visible]);
+  return {
+    pending: attempted && busy,
+    failure:
+      attempted && !busy && error ? (
+        <Notice tone="error" title="This change could not be completed">
+          <Copy>{error}</Copy>
+          <Copy kind="small">You can try again.</Copy>
+        </Notice>
+      ) : null,
+    run: (work: () => void) => {
+      setAttempted(true);
+      work();
+    },
+  };
+}
 export function ConfirmDialog({
   visible,
   title,
@@ -350,24 +445,23 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const action = useDialogAction(visible);
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="none"
-      onRequestClose={onCancel}
-    >
-      <View style={styles.backdrop}>
-        <View accessibilityViewIsModal role="dialog" style={styles.dialog}>
-          <Copy kind="heading" accessibilityRole="header">
-            {title}
-          </Copy>
-          <Copy>{message}</Copy>
-          <Button label={confirm} variant="destructive" onPress={onConfirm} />
-          <Button label={cancel} variant="secondary" onPress={onCancel} />
-        </View>
-      </View>
-    </Modal>
+    <Dialog visible={visible} onRequestClose={onCancel}>
+      <Copy kind="heading" accessibilityRole="header">
+        {title}
+      </Copy>
+      <Copy>{message}</Copy>
+      {action.failure}
+      <Button
+        label={confirm}
+        variant="destructive"
+        loading={action.pending}
+        disabled={action.pending}
+        onPress={() => action.run(onConfirm)}
+      />
+      <Button label={cancel} variant="secondary" onPress={onCancel} />
+    </Dialog>
   );
 }
 export const styles = StyleSheet.create({
@@ -438,19 +532,19 @@ export const styles = StyleSheet.create({
   disclaimer: { flexDirection: "row", gap: 10, paddingTop: 4 },
   backdrop: {
     flex: 1,
-    padding: 24,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#152c2666",
   },
   dialog: {
-    padding: 24,
     backgroundColor: colors.background,
     width: "100%",
     maxWidth: 420,
+    maxHeight: "100%",
     borderRadius: 20,
-    gap: 20,
+    overflow: "hidden",
   },
+  dialogContent: { padding: 24, gap: 20 },
   input: {
     borderWidth: 1,
     borderColor: "#8b998e",

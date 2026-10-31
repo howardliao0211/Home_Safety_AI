@@ -48,7 +48,12 @@
     "test": "tsx --test tests/*.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:api": "playwright test -c playwright.api.config.ts",
-    "format": "prettier --write app src tests playwright.config.ts"
+    "format": "prettier --write app src tests playwright.config.ts",
+    "build:android": "npx --yes eas-cli@latest build --platform android --profile preview",
+    "build:ios": "npx --yes eas-cli@latest build --platform ios --profile preview",
+    "build:all": "npx --yes eas-cli@latest build --platform all --profile preview",
+    "build:store": "npx --yes eas-cli@latest build --platform all --profile production",
+    "build:ios:simulator": "npx --yes eas-cli@latest build --platform ios --profile simulator"
   },
   "private": true
 }
