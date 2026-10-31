@@ -1,95 +1,143 @@
-import { View } from "react-native";
-import { Redirect, router, type Href } from "expo-router";
-import { destination, latest } from "@/domain/model";
+import { useCallback, useState } from "react";
+import { ActivityIndicator, View } from "react-native";
+import { router, useFocusEffect, type Href } from "expo-router";
+import { destination } from "@/domain/model";
 import { usePreview } from "@/hooks/preview-context";
-import { Icon } from "@/components/icon";
+import { NewAssessmentButton } from "@/components/new-assessment-button";
+import { HistoryRow } from "@/components/history-row";
+import { BrandMark } from "@/components/brand";
 import {
   Button,
   Copy,
   Disclaimer,
+  Notice,
   Panel,
-  PhotoView,
   PreviewNotice,
   Screen,
-  styles,
 } from "@/components/ui";
 import { colors } from "@/components/theme";
 
-export default function StartScreen() {
-  const { state, startDraft } = usePreview();
-  const assessment = latest(state);
-  if (state.draft) return <Redirect href="/capture" />;
-  if (assessment) return <Redirect href={destination(assessment) as Href} />;
+export default function HomeScreen() {
+  const {
+    state,
+    busy,
+    history,
+    historyLoading,
+    historyError,
+    historyLoaded,
+    historyCursor,
+    loadHistory,
+    retryHistory,
+    loadAssessment,
+  } = usePreview();
+  const [openingError, setOpeningError] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!historyLoaded) void loadHistory();
+    }, [historyLoaded]),
+  );
+  const open = async (id: string) => {
+    setOpeningError(false);
+    const assessment = await loadAssessment(id);
+    if (assessment) router.push(destination(assessment) as Href);
+    else setOpeningError(true);
+  };
   return (
     <Screen>
-      <View style={styles.row}>
-        <View
-          style={{
-            padding: 12,
-            backgroundColor: colors.soft,
-            borderRadius: 16,
-          }}
-        >
-          <Icon name="home" size={27} />
+      <View style={{ flexDirection: "row", gap: 16, alignItems: "center" }}>
+        <BrandMark size={52} />
+        <View style={{ flex: 1, gap: 4 }}>
+          <Copy kind="eyebrow">A LITTLE CARE. EVERY DAY.</Copy>
+          <Copy kind="title" accessibilityRole="header">
+            Your home,{"\n"}one room at a time.
+          </Copy>
         </View>
-        <Copy kind="eyebrow">A LITTLE CARE. EVERY DAY.</Copy>
       </View>
-      <View style={{ gap: 12 }}>
-        <Copy kind="title" accessibilityRole="header">
-          A fresh look at{"\n"}the place you call home.
+      <Copy style={{ color: colors.muted }}>
+        A fresh look at your space, and a practical next step for the people you
+        care about.
+      </Copy>
+      <NewAssessmentButton />
+      {state.draft && (
+        <Panel>
+          <Copy kind="heading">Continue where you left off</Copy>
+          <Copy kind="small">
+            Your unfinished room is saved on this device.
+          </Copy>
+          <Button
+            label="Resume assessment"
+            variant="secondary"
+            icon="arrow"
+            onPress={() => router.push("/capture")}
+          />
+        </Panel>
+      )}
+      <View style={{ gap: 8 }}>
+        <Copy kind="heading" accessibilityRole="header">
+          Previous assessments
         </Copy>
-        <Copy style={{ color: colors.muted }}>
-          Turn a room photo into a practical checklist for the people you care
-          about.
-        </Copy>
+        <Button
+          label="Refresh history"
+          variant="text"
+          icon="refresh"
+          disabled={historyLoading}
+          onPress={() => void loadHistory()}
+        />
+        {historyLoading && (
+          <ActivityIndicator
+            color={colors.accent}
+            accessibilityLabel="Loading assessment history"
+          />
+        )}
+        {historyError && (
+          <Notice title="History could not load" tone="error">
+            <Copy>{historyError}</Copy>
+            <Button
+              label="Retry loading history"
+              variant="text"
+              disabled={historyLoading}
+              onPress={() => void retryHistory()}
+            />
+          </Notice>
+        )}
+        {openingError && (
+          <Notice title="Assessment unavailable" tone="error">
+            <Copy>
+              We could not open this assessment. Refresh history or select it
+              again to retry.
+            </Copy>
+          </Notice>
+        )}
+        {historyLoaded &&
+          !historyLoading &&
+          !historyError &&
+          history.length === 0 && (
+            <Panel>
+              <Copy kind="heading">Start with a familiar room</Copy>
+              <Copy>
+                Your previous assessments will appear here. Take or choose a
+                room photo to begin.
+              </Copy>
+            </Panel>
+          )}
+        {history.map((item) => (
+          <HistoryRow
+            key={item.id}
+            item={item}
+            disabled={busy}
+            onPress={() => void open(item.id)}
+          />
+        ))}
+        {historyCursor && (
+          <Button
+            label="Load more"
+            variant="secondary"
+            disabled={historyLoading}
+            onPress={() => void loadHistory(true)}
+          />
+        )}
       </View>
       <PreviewNotice />
-      <Button
-        label="Start with a room"
-        icon="arrow"
-        onPress={() =>
-          void startDraft().then((ok) => {
-            if (ok) router.push("/capture");
-          })
-        }
-      />
-      <PhotoView
-        photo={{
-          id: "welcome",
-          label: "A comfortable living room",
-          sample: "living",
-        }}
-      />
-      <Panel>
-        <Copy kind="heading">One room. A few thoughtful steps.</Copy>
-        {[
-          [
-            "01",
-            "Choose a room photo",
-            "Take a photo, choose one, or explore a sample.",
-          ],
-          [
-            "02",
-            "See what needs attention",
-            "Read potential concerns and ask for a closer look.",
-          ],
-          [
-            "03",
-            "Make a plan, at your pace",
-            "Work through your checklist. You make the final call.",
-          ],
-        ].map(([number, title, text]) => (
-          <View key={number} style={{ flexDirection: "row", gap: 16 }}>
-            <Copy kind="eyebrow" style={{ paddingTop: 3 }}>
-              {number}
-            </Copy>
-            <View style={{ flex: 1, gap: 3 }}>
-              <Copy style={{ fontWeight: "600" }}>{title}</Copy>
-              <Copy kind="small">{text}</Copy>
-            </View>
-          </View>
-        ))}
-      </Panel>
       <Disclaimer />
     </Screen>
   );

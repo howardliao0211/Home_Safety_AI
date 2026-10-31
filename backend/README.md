@@ -105,6 +105,7 @@ URL, managed account, and physical-device networking configuration.
 | `GET /health` | Liveness only; no model call or storage readiness guarantee |
 | `POST /v1/assessments` | Multipart `assessment_id`, `photo`, optional `profiles` JSON array, `household_context`; retains upload and returns `ready` |
 | `GET /v1/assessments/latest` | Latest assessment for this account; skips deletions in progress; 404 if none |
+| `GET /v1/assessments?limit=20&cursor=...` | Account history, newest first; lightweight `items` and nullable `next_cursor`; skips deletions |
 | `GET /v1/assessments/{aid}` | Current state, findings and linked submissions |
 | `POST /v1/assessments/{aid}/analyze` | Runs initial analysis; same endpoint manually retries failures |
 | `PATCH /v1/assessments/{aid}/findings/{fid}` | JSON `status`: `open`, `resolved`, or `dismissed`, optional `note` (omitted preserves the current note; empty clears it) |
@@ -119,6 +120,14 @@ Profiles are `Older adult`, `Child`, `Baby`, `Pet`, including multiple profiles;
 10 MiB and 20 megapixels. The backend applies EXIF orientation, resizes to at
 most 1600 pixels per side, and stores a JPEG without metadata. IDs and photo
 references are generated and checked by the server.
+
+Initial analysis also produces a neutral room `title` (prompted at 1–4 words),
+saved alongside the summary and findings. Missing/blank titles remain compatible
+with older records. The frontend displays “Room assessment” with the date when
+missing, and truncates titles longer than eight words without changing stored text.
+History returns at most `limit` items (1–100, default 20), ordered by creation time
+then ID descending. Pass the opaque `next_cursor` to load the next page; cursors
+are scoped to the authenticated account. Listing/opening records never runs analysis.
 
 For example, from the repo root in another terminal (with a running backend):
 

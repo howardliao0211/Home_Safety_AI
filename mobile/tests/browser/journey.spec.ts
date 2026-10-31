@@ -9,7 +9,7 @@ async function start(page: Page, scenario?: string) {
       .click();
     await page.getByRole("radio", { name: scenario, exact: true }).click();
     await page.getByRole("button", { name: "Start fresh demo" }).click();
-  } else await page.getByRole("button", { name: "Start with a room" }).click();
+  } else await page.getByRole("button", { name: "Assess a room" }).click();
   await expect(
     page.getByRole("button", { name: "Review photo", exact: true }),
   ).toBeVisible();
@@ -171,7 +171,7 @@ test("skipping an uncertain finding still permits a user-requested review", asyn
   ).toBeVisible();
 });
 
-test("new draft cancellation retains the previous assessment; deleting latest opens earlier data", async ({
+test("new draft cancellation retains the previous assessment; deletion returns Home with earlier data", async ({
   page,
 }) => {
   await sampleAssessment(page);
@@ -187,6 +187,8 @@ test("new draft cancellation retains the previous assessment; deleting latest op
   ).toBeEnabled();
   await page.getByRole("button", { name: "Cancel new assessment" }).click();
   await page.getByRole("button", { name: "Discard draft" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.getByRole("button", { name: /^Open Living Room Review/ }).click();
   await expect(page).toHaveURL(first);
   await page
     .getByRole("button", { name: "New assessment", exact: true })
@@ -202,6 +204,8 @@ test("new draft cancellation retains the previous assessment; deleting latest op
   await page
     .getByRole("button", { name: "Delete assessment and photos" })
     .click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.getByRole("button", { name: /^Open Living Room Review/ }).click();
   await expect(page).toHaveURL(first);
   await page
     .getByRole("button", { name: "Delete assessment", exact: true })
@@ -210,7 +214,7 @@ test("new draft cancellation retains the previous assessment; deleting latest op
     .getByRole("button", { name: "Delete assessment and photos" })
     .click();
   await expect(
-    page.getByRole("button", { name: "Start with a room" }),
+    page.getByRole("button", { name: "Assess a room" }),
   ).toBeVisible();
 });
 
@@ -254,7 +258,7 @@ test("actual browser upload persists across reload and deletion removes retained
     .getByRole("button", { name: "Delete assessment and photos" })
     .click();
   await expect(
-    page.getByRole("button", { name: "Start with a room" }),
+    page.getByRole("button", { name: "Assess a room" }),
   ).toBeVisible();
 });
 
@@ -406,11 +410,11 @@ test("preview reset removes assessments and the unfinished draft only after conf
     .getByRole("button", { name: "Reset all data", exact: true })
     .click();
   await expect(
-    page.getByRole("button", { name: "Start with a room" }),
+    page.getByRole("button", { name: "Assess a room" }),
   ).toBeVisible();
   await page.reload();
   await expect(
-    page.getByRole("button", { name: "Start with a room" }),
+    page.getByRole("button", { name: "Assess a room" }),
   ).toBeVisible();
 });
 

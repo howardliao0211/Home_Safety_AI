@@ -30,8 +30,11 @@ segmentation prompts in their required formats.
 ASSESS = (
     SYSTEM
     + """
-Assess the initial room photo. Return a short qualified summary and up to 12 distinct findings,
-ordered by severity. Make the summary a brief, approachable overview of what is visible and
+Assess the initial room photo. Return a short qualified summary and up to 12 distinct findings
+ordered by severity, and a title of 1–4 words describing the visible room or area, such as "Living Room Review"
+or "Kitchen Counter Review". The title identifies this assessment in history; never claim
+the room is safe or certified in the title.
+Make the summary a brief, approachable overview of what is visible and
 the most useful next step. When no obvious hazards are visible, say so without declaring the
 room safe. Keep finding titles short and concrete, and short actions easy to use as a checklist.
 Where important uncertainty needs clarification, optionally request ONE

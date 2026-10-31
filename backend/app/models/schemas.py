@@ -62,8 +62,16 @@ class ProposedFinding(FindingContent):
 
 
 class AssessmentResult(StrictModel):
+    title: Annotated[str | None, Field(max_length=3000)]
     summary: Text
     findings: Annotated[list[ProposedFinding], Field(max_length=12)]
+
+    @model_validator(mode="before")
+    @classmethod
+    def tolerate_missing_title(cls, data):
+        if isinstance(data, dict) and "title" not in data:
+            return {**data, "title": None}
+        return data
 
 
 class RevisionResult(StrictModel):
@@ -194,6 +202,7 @@ class Assessment(Operation):
     household_context: str = ""
     input_hash: str
     summary: str | None = None
+    title: Annotated[str | None, Field(max_length=3000)] = None
     findings: list[Finding] = Field(default_factory=list)
     disclaimer: str = DISCLAIMER
     deleting: bool = False

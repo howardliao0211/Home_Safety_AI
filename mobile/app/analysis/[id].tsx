@@ -14,23 +14,34 @@ import {
   Screen,
   Step,
 } from "@/components/ui";
+import { useIsFocused } from "expo-router/react-navigation";
+import { AssessmentGate } from "@/components/assessment-gate";
+import { NewAssessmentButton } from "@/components/new-assessment-button";
 import { colors } from "@/components/theme";
 
-export default function AnalysisScreen() {
+export default function AnalysisRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { state, busy, runAnalysis, startDraft, deleteAssessment } =
-    usePreview();
+  return (
+    <AssessmentGate id={id}>
+      <AnalysisScreen />
+    </AssessmentGate>
+  );
+}
+
+function AnalysisScreen() {
+  const focused = useIsFocused();
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const { state, busy, runAnalysis, deleteAssessment } = usePreview();
   const [deleting, setDeleting] = useState(false);
   const assessment = state.assessments.find((a) => a.id === id);
   useEffect(() => {
     if (assessment?.status === "ready") void runAnalysis(id);
   }, [id, assessment?.status]);
   useEffect(() => {
-    if (assessment?.status === "complete") {
-      router.dismissAll();
+    if (focused && assessment?.status === "complete") {
       router.replace(`/assessment/${id}`);
     }
-  }, [id, assessment?.status]);
+  }, [id, assessment?.status, focused]);
   if (!assessment) return <Redirect href="/" />;
   if (assessment.status === "complete") return null;
   const failed =
@@ -83,15 +94,7 @@ export default function AnalysisScreen() {
       )}
       {failed && (
         <>
-          <Button
-            label="Start another assessment"
-            variant="secondary"
-            onPress={() =>
-              void startDraft().then((ok) => {
-                if (ok) router.push("/capture");
-              })
-            }
-          />
+          <NewAssessmentButton label="Start another assessment" secondary />
           <Button
             label="Delete assessment"
             variant="danger"

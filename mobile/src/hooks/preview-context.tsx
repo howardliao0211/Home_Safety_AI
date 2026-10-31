@@ -28,6 +28,7 @@ import {
 import { createPersistence } from "@/storage/persistence";
 import { createPhotoStorage } from "@/storage/photos";
 import { StateStore } from "@/storage/state-store";
+import { historyItem, newestFirst, type HistoryItem } from "@/domain/history";
 
 type Session = {
   scope: string;
@@ -45,6 +46,14 @@ function usePreviewState(session: Session) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [cleanupError, setCleanupError] = useState<string>();
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string>();
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [historyCursor, setHistoryCursor] = useState<string>();
+  const historyActive = useRef(false);
+  const historyRetryMore = useRef(false);
+  const historyChanges = useRef(new Map<string, HistoryItem | null>());
   const store = useRef<StateStore | null>(null);
   if (!store.current) store.current = new StateStore(persistence, setState);
   const repository = store.current;
@@ -73,23 +82,60 @@ function usePreviewState(session: Session) {
     if (!result) throw new Error("This assessment is no longer available.");
     return result;
   };
-  const saveServer = (assessment: Assessment) =>
-    repository.update((s) => ({
+  const saveServer = async (assessment: Assessment) => {
+    await repository.update((s) => ({
       ...s,
       assessments: [
         ...s.assessments.filter((a) => a.id !== assessment.id),
         assessment,
       ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     }));
-  async function refreshLatest() {
-    const latest = await (await backend()).latest(repository.state.assessments);
-    await repository.update((s) => ({
-      ...s,
-      assessments: [
-        ...s.assessments.filter((a) => !a.serverSaved && a.id !== latest?.id),
-        ...(latest ? [latest] : []),
-      ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-    }));
+    if (sessionActive.current) {
+      historyChanges.current.set(assessment.id, historyItem(assessment));
+      setHistory((items) =>
+        [
+          ...items.filter((a) => a.id !== assessment.id),
+          historyItem(assessment),
+        ].sort(newestFirst),
+      );
+    }
+  };
+  async function loadHistory(more = false) {
+    if (historyActive.current || !sessionActive.current || !apiEnabled) return;
+    historyActive.current = true;
+    historyRetryMore.current = more;
+    historyChanges.current.clear();
+    setHistoryLoading(true);
+    setHistoryError(undefined);
+    try {
+      const page = await (
+        await backend()
+      ).history(more ? historyCursor : undefined);
+      if (!sessionActive.current) return;
+      setHistory((previous) => {
+        const items = more ? previous : [];
+        const merged = new Map(items.map((item) => [item.id, item]));
+        page.items.forEach((item) => merged.set(item.id, item));
+        // Mutations that completed while this page was in flight take precedence.
+        historyChanges.current.forEach((item, id) => {
+          if (item) merged.set(id, item);
+          else merged.delete(id);
+        });
+        return [...merged.values()].sort(newestFirst);
+      });
+      setHistoryCursor(page.nextCursor);
+      setHistoryLoaded(true);
+      return true;
+    } catch (e) {
+      if (sessionActive.current)
+        setHistoryError(
+          e instanceof Error ? e.message : "History could not load. Try again.",
+        );
+      return false;
+    } finally {
+      historyActive.current = false;
+      if (sessionActive.current) setHistoryLoading(false);
+    }
   }
   async function retainFailure(
     id: string,
@@ -169,7 +215,20 @@ function usePreviewState(session: Session) {
         await removeLegacyPhotos();
       }
       await repository.load();
-      if (apiEnabled) await refreshLatest();
+      // Restored ready records require an explicit retry, never a model call on navigation.
+      await repository.update((s) => ({
+        ...s,
+        assessments: s.assessments.map((a) =>
+          a.status === "ready"
+            ? {
+                ...a,
+                status: "failed",
+                error:
+                  "This assessment has unfinished analysis. Your input is saved. Retry when ready.",
+              }
+            : a,
+        ),
+      }));
       setReady(true);
       await cleanup();
     });
@@ -217,6 +276,22 @@ function usePreviewState(session: Session) {
     loadRemotePhoto: async (photo: NonNullable<Photo["remote"]>) =>
       (await backend()).photoDataUrl(photo),
     state,
+    history: apiEnabled
+      ? [
+          ...history,
+          ...state.assessments
+            .filter(
+              (a) => !a.serverSaved && !history.some((h) => h.id === a.id),
+            )
+            .map(historyItem),
+        ].sort(newestFirst)
+      : state.assessments.map(historyItem).sort(newestFirst),
+    historyLoading,
+    historyError,
+    historyLoaded: !apiEnabled || historyLoaded,
+    historyCursor,
+    loadHistory,
+    retryHistory: () => loadHistory(historyRetryMore.current),
     ready,
     busy,
     error,
@@ -226,11 +301,17 @@ function usePreviewState(session: Session) {
     clearError: () => setError(undefined),
     reportError: (message: string) => setError(message),
     update,
-    startDraft: () =>
-      update((s) => ({
-        ...s,
-        draft: s.draft ?? { profiles: [], scenario: s.nextScenario },
-      })),
+    startDraft: (replace = false) =>
+      act(async () => {
+        await repository.update((s) => ({
+          ...s,
+          draft: replace
+            ? { profiles: [], scenario: s.nextScenario }
+            : (s.draft ?? { profiles: [], scenario: s.nextScenario }),
+        }));
+        if (replace) await cleanup();
+        return true;
+      }),
     editDraft: (change: (draft: Draft) => Draft) =>
       update((s) => ({
         ...s,
@@ -291,6 +372,14 @@ function usePreviewState(session: Session) {
           await editAssessment(id, (a) => ({
             ...a,
             status: "complete",
+            title:
+              a.scenario === "clear"
+                ? undefined
+                : a.scenario === "uncertain"
+                  ? "Living room with a tall cabinet beside the sitting area"
+                  : a.photo.sample === "quiet"
+                    ? "Quiet Room Review"
+                    : "Living Room Review",
             findings,
             error: undefined,
           }));
@@ -508,13 +597,34 @@ function usePreviewState(session: Session) {
         }
       }),
     annotationClient: backend,
-    refreshLatestAssessment: () =>
+    loadAssessment: (id: string) =>
+      act(async () => {
+        const cached = repository.state.assessments.find((a) => a.id === id);
+        if (apiEnabled && (!cached || cached.serverSaved)) {
+          const loaded = await (await backend()).open(id, cached);
+          await saveServer(loaded);
+          return loaded;
+        }
+        if (!cached) throw new Error("This assessment is no longer available.");
+        if (cached.status === "ready") {
+          const recovered: Assessment = {
+            ...cached,
+            status: "failed",
+            error: "This assessment has unfinished analysis. Retry when ready.",
+          };
+          await saveServer(recovered);
+          return recovered;
+        }
+        return cached;
+      }),
+    refreshHistory: () =>
       act(async () => {
         if (!apiEnabled)
           throw new Error(
             "Connect to the service to refresh an account assessment.",
           );
-        await refreshLatest();
+        if (!(await loadHistory()))
+          throw new Error("Could not refresh your assessment history.");
         return true;
       }),
     refreshAssessment: async (id: string) => {
@@ -528,7 +638,8 @@ function usePreviewState(session: Session) {
           ...s,
           assessments: s.assessments.filter((a) => a.id !== id),
         }));
-        if (apiEnabled) await refreshLatest();
+        historyChanges.current.set(id, null);
+        setHistory((items) => items.filter((a) => a.id !== id));
         await cleanup();
         return true;
       }),

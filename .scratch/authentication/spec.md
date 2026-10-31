@@ -33,13 +33,17 @@ password database, token issuer, or password-reset mechanism.
   and meaningful automated and device-level checks.
 
 Explicitly excluded: social sign-in, MFA, email-address changes, guest access,
-per-account AI quotas, a history browser, live synchronization, offline sign-in,
+per-account AI quotas, live synchronization, offline sign-in,
 offline upload queues, automatic legacy-data import, custom email-action pages,
 automatic deep-link return from email actions, and store publication.
 
 Open registration does not make paid AI usage bounded. Per-account usage limits
 were explicitly deferred to separate work; do not add them to this feature.
 Provider-managed authentication protections and quotas still apply.
+
+Home and account-scoped history are added by
+[`home-history/spec.md`](../home-history/spec.md), which supersedes latest-only
+navigation in this spec. Authentication and account isolation remain unchanged.
 
 ## Existing implementation and constraints
 
@@ -191,9 +195,9 @@ photos or assessment screens while resolving identity.
 - An invalidated session returns to login with a recovery message and hides account
   data. Network failure is distinct from sign-out: show retry and do not silently
   erase valid local work simply because the network is unavailable.
-- A verified account on either platform fetches its latest server assessment.
-  Refresh/reopen retrieves updates from other devices. Do not add live listeners,
-  a history browser, or an offline mutation queue in this feature.
+- A verified account on either platform opens Home and can browse retained server
+  assessments as specified in `../home-history/spec.md`. Refresh/reopen retrieves
+  updates from other devices. Do not add live listeners or an offline mutation queue.
 
 ## Account and data deletion
 

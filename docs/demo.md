@@ -21,7 +21,7 @@ cd mobile
 npm run web
 ```
 
-Open the printed localhost URL. On first use, choose **Start with a room**.
+Open the printed localhost URL. On first use, choose **Assess a room**.
 Use a camera/gallery photo or a bundled sample, select optional profiles
 (including **Baby**), confirm, and create a sample assessment.
 

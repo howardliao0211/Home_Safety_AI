@@ -34,6 +34,7 @@ class IntegrationProvider:
                 "uncertainty": "The photo cannot establish how often the route is used.",
             }
             return {
+                "title": "Living Room Review",
                 "summary": "Browser integration fixture: two potential findings.",
                 "findings": [
                     {

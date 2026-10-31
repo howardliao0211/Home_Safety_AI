@@ -7,7 +7,7 @@ Start the frontend, backend, and storage emulators using the
 
 These checks call the selected model provider and consume model quota:
 
-1. Choose **Start with a room**, select a photo or bundled sample, choose
+1. Choose **Assess a room**, select a photo or bundled sample, choose
    optional household profiles, and create an assessment.
 2. Check that findings appear and that resolving or dismissing findings survives
    a browser reload.
@@ -16,10 +16,12 @@ These checks call the selected model provider and consume model quota:
    **Retry** action repeats the operation.
 5. Confirm deletion and check that the assessment is removed with its photos.
 
-API mode retains assessment state and photos through the backend, scoped by a
-persistent device ID. Preview data stays on the device. Each mode uses separate
+API mode retains assessment state and photos through the backend, scoped by the
+signed-in Firebase account. Preview data stays on the device. Each mode uses separate
 local state; reloads retain assessments and checklist actions. Starting a new
-assessment retains earlier assessments.
+assessment retains earlier assessments. Return Home to reopen any saved assessment
+from Previous assessments. A local draft can be resumed from Home; starting another
+room asks before discarding it. See [Home/history checks](home-history.md).
 
 ## Frontend preview and devices
 

@@ -38,7 +38,9 @@ Start/resume → photo and household profiles → photo confirmation → analysi
 progress → findings/checklist → finding detail → linked follow-up or photo review.
 
 Use a stack with clear titles and back navigation. Do not add bottom tabs.
-No account, settings, or assessment-history screens are included.
+Home with assessment history is added by
+[`home-history/spec.md`](../home-history/spec.md), superseding the start/resume and
+latest-only navigation described below. Account flows remain a separate feature.
 
 | Page | Content and actions | Required states |
 | --- | --- | --- |
@@ -123,16 +125,16 @@ the domain definition. Do not expose “Infant” as the profile label in the UI
 
 - Persist the latest assessment, profile selections, evidence, findings,
   dismissal notes, follow-up state, and review state across reloads/restarts.
-- Restore the latest assessment without requiring a history screen. If analysis
+- Restore assessment state and open Home with history. If analysis
   was interrupted, present a recoverable state with manual retry; do not invent
   successful results or spin indefinitely.
 - Starting a new assessment retains earlier assessments and their photos. It
   does not delete or overwrite the last completed assessment when a new draft
-  is cancelled. Opening earlier assessments through a history UI is deferred.
+  is cancelled. Earlier assessments can be opened from Home history.
 - Confirm before abandoning an unfinished photo submission.
 - Confirm Delete assessment, then remove its locally retained record and all
-  associated photos. Reopen the latest remaining assessment, or show the
-  first-use state when none remain.
+  associated photos. Return to Home, retaining the remaining history or showing
+  its empty state when none remain.
 - Provide an explicit development-only reset to clear preview data. Keep it
   separate from deleting a single assessment.
 - Surface storage/write failures rather than implying changes were saved.
@@ -256,8 +258,8 @@ behavior where useful, without duplicating trivial UI implementation details.
 ## Out of scope
 
 Real Muse analysis or accuracy evaluation; FastAPI/VM integration; final API
-schemas; authentication or accounts; cross-device sync; assessment history and
-comparison screens; photo annotations; illustrative redesign; shopping or
+schemas; authentication or accounts; cross-device sync; assessment comparison
+screens; photo annotations; illustrative redesign; shopping or
 booking; dark theme; iOS acceptance; custom native builds unless a verified
 requirement makes Expo Go insufficient.
 

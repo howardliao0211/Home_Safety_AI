@@ -74,11 +74,11 @@ test("a stalled deletion poll can be cancelled without affecting the next accoun
     .fill("Strong-password-123");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Start with a room", exact: true }),
+    page.getByRole("button", { name: "Assess a room", exact: true }),
   ).toBeVisible();
   release();
   await expect(
-    page.getByRole("button", { name: "Start with a room", exact: true }),
+    page.getByRole("button", { name: "Assess a room", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByText("Your account and associated data have been deleted.", {
@@ -219,9 +219,9 @@ test("registration, verification refresh, sign-out isolation and password recove
   ).toBeTruthy();
   await page.getByRole("button", { name: "I’ve verified my email" }).click();
   await expect(
-    page.getByRole("button", { name: "Start with a room" }),
+    page.getByRole("button", { name: "Assess a room" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Start with a room" }).click();
+  await page.getByRole("button", { name: "Assess a room" }).click();
   await page.getByRole("button", { name: "Use living room sample" }).click();
   await page.getByRole("button", { name: "Account", exact: true }).click();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
@@ -273,6 +273,6 @@ test("registration, verification refresh, sign-out isolation and password recove
     .fill("Changed-password-456");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Start with a room" }),
+    page.getByRole("button", { name: "Assess a room" }),
   ).toBeVisible();
 });

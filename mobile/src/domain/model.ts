@@ -87,6 +87,7 @@ export type Finding = {
 };
 export type Assessment = {
   id: string;
+  title?: string;
   createdAt: string;
   photo: Photo;
   profiles: Profile[];

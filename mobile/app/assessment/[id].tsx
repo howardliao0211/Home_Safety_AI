@@ -18,11 +18,22 @@ import {
   Screen,
   styles,
 } from "@/components/ui";
+import { AssessmentGate } from "@/components/assessment-gate";
+import { NewAssessmentButton } from "@/components/new-assessment-button";
 import { colors } from "@/components/theme";
 
-export default function AssessmentScreen() {
+export default function AssessmentRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { state, startDraft, deleteAssessment } = usePreview();
+  return (
+    <AssessmentGate id={id}>
+      <AssessmentScreen />
+    </AssessmentGate>
+  );
+}
+
+function AssessmentScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const { state, deleteAssessment } = usePreview();
   const [deleting, setDeleting] = useState(false);
   const assessment = state.assessments.find((a) => a.id === id);
   if (!assessment) return <Redirect href="/" />;
@@ -136,16 +147,7 @@ export default function AssessmentScreen() {
           </Copy>
         </Notice>
       )}
-      <Button
-        label="New assessment"
-        icon="plus"
-        variant="secondary"
-        onPress={() =>
-          void startDraft().then((ok) => {
-            if (ok) router.push("/capture");
-          })
-        }
-      />
+      <NewAssessmentButton label="New assessment" secondary />
       <Disclaimer />
       <Button
         label="Delete assessment"

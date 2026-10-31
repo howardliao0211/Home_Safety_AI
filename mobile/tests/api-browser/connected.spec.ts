@@ -40,7 +40,7 @@ async function submit(page: Page) {
 async function start(page: Page) {
   await page.goto("/");
   await page
-    .getByRole("button", { name: "Start with a room", exact: true })
+    .getByRole("button", { name: "Assess a room", exact: true })
     .click();
 }
 test.beforeEach(async ({ page, request }) => {
@@ -65,7 +65,7 @@ test.beforeEach(async ({ page, request }) => {
     .fill("Strong-password-123");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Start with a room", exact: true }),
+    page.getByRole("button", { name: "Assess a room", exact: true }),
   ).toBeVisible();
   await request.post(backend + "/__test/control", {
     data: { fail_initial: 0, fail_revision: 0 },
@@ -135,6 +135,7 @@ test("connected lifecycle: upload, retained failures, retry, cache-free restore,
     db.close();
   });
   await page.goto("/");
+  await page.getByRole("button", { name: /^Open / }).click();
   await expect(page.getByText("0 of 2 handled", { exact: true })).toBeVisible();
   expect(await deviceId(page)).toBe(identity);
   await expect(
@@ -218,7 +219,7 @@ test("connected lifecycle: upload, retained failures, retry, cache-free restore,
     .getByRole("button", { name: "Delete assessment and photos", exact: true })
     .click();
   await expect(
-    page.getByRole("button", { name: "Start with a room", exact: true }),
+    page.getByRole("button", { name: "Assess a room", exact: true }),
   ).toBeVisible();
   const headers = {
     Authorization: await bearer(page),
@@ -245,9 +246,7 @@ test("network failures retain the session and retry without preview fallback", a
   page,
 }) => {
   const identity = await deviceId(page);
-  await page.route(backend + "/v1/assessments/latest", (route) =>
-    route.abort(),
-  );
+  await page.route(backend + "/v1/assessments", (route) => route.abort());
   await page.reload();
   await expect(
     page.getByText(/Could not reach the assessment service/),
@@ -255,10 +254,10 @@ test("network failures retain the session and retry without preview fallback", a
   await expect(
     page.getByText("INTERACTIVE PREVIEW", { exact: true }),
   ).toHaveCount(0);
-  await page.unroute(backend + "/v1/assessments/latest");
-  await page.getByRole("button", { name: "Retry connecting" }).click();
+  await page.unroute(backend + "/v1/assessments");
+  await page.getByRole("button", { name: "Retry loading history" }).click();
   await expect(
-    page.getByRole("button", { name: "Start with a room", exact: true }),
+    page.getByRole("button", { name: "Assess a room", exact: true }),
   ).toBeVisible();
   expect(await deviceId(page)).toBe(identity);
 });
@@ -308,7 +307,7 @@ test("sign-out during analysis discards the late response before another account
     .fill("Strong-password-123");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Start with a room", exact: true }),
+    page.getByRole("button", { name: "Assess a room", exact: true }),
   ).toBeVisible();
   await expect(page.getByText("0 of 2 handled", { exact: true })).toHaveCount(
     0,
@@ -319,7 +318,7 @@ test("sign-out during analysis discards the late response before another account
   });
 });
 
-test("real file upload, failed status write, server restart state and latest restoration after deletion", async ({
+test("real file upload, failed status write, server restart state and history restoration after deletion", async ({
   page,
   request,
 }) => {
@@ -374,6 +373,8 @@ test("real file upload, failed status write, server restart state and latest res
   await page
     .getByRole("button", { name: "Delete assessment and photos", exact: true })
     .click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.getByRole("button", { name: /^Open / }).click();
   await expect(page).toHaveURL(new RegExp(`/assessment/${first.id}$`));
   await expect(page.getByText("1 of 2 handled", { exact: true })).toBeVisible();
 });

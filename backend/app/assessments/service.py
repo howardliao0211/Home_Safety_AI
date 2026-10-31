@@ -76,6 +76,17 @@ class AssessmentService:
     def latest(self, owner_uid: str) -> Assessment:
         return require(self.repository.latest(owner_uid))
 
+    def history(self, owner_uid: str, limit: int, cursor: str | None):
+        from app.assessments.history import decode_cursor, encode_cursor, history_item
+
+        after = decode_cursor(cursor, owner_uid) if cursor else None
+        records = self.repository.history(owner_uid, limit + 1, after)
+        page = records[:limit]
+        return {
+            "items": [history_item(a) for a in page],
+            "next_cursor": encode_cursor(owner_uid, page[-1]) if len(records) > limit else None,
+        }
+
     def _mutate(self, owner_uid, assessment_id, change, *, lease_id=None):
         def apply(previous):
             assessment = require(previous)
@@ -346,6 +357,7 @@ class AssessmentService:
                         key=lambda item: {"High": 0, "Medium": 1, "Low": 2}[item.severity],
                     )
                     current.summary = result.summary
+                    current.title = result.title
                     current.findings = [
                         Finding(
                             **item.model_dump(exclude={"follow_up", "segmentation_prompt"}),

@@ -10,6 +10,58 @@ import { IdentityStore } from "../src/storage/identity-store";
 
 const id = "11111111-1111-4111-8111-111111111111";
 
+test("history exposes lightweight metadata and opening a retained upload never submits analysis", async () => {
+  const requests: string[] = [];
+  const dto = {
+    ...remote(),
+    title: "Living Room Review",
+    status: "ready" as const,
+    findings: [],
+  };
+  const client = new BackendClient(
+    { baseUrl: "http://localhost:8000", getToken: async () => "account-token" },
+    async () => {
+      throw new Error("Browsing must not upload photos");
+    },
+    async (input, init) => {
+      assert.equal(init?.method ?? "GET", "GET");
+      assert.equal(
+        new Headers(init?.headers).get("Authorization"),
+        "Bearer account-token",
+      );
+      requests.push(String(input));
+      if (String(input).includes("?cursor="))
+        return Response.json({
+          items: [
+            {
+              id,
+              title: dto.title,
+              created_at: dto.created_at,
+              status: "ready",
+              open_count: null,
+              photo: dto.photo,
+            },
+          ],
+          next_cursor: null,
+        });
+      return Response.json(dto);
+    },
+  );
+  const page = await client.history("page+/=");
+  assert.equal(page.items[0].title, "Living Room Review");
+  assert.equal(page.items[0].openCount, null);
+  assert.deepEqual(page.items[0].photo.remote, {
+    assessmentId: id,
+    photoId: "photo-id",
+  });
+  const opened = await client.open(id);
+  assert.equal(opened.status, "failed");
+  assert.match(opened.error!, /unfinished analysis/);
+  assert.equal(opened.title, "Living Room Review");
+  assert.equal(requests.length, 2);
+  assert.match(requests[0], /cursor=page%2B%2F%3D/);
+});
+
 test("API invokes fetch without a client receiver, as required by browser fetch", async () => {
   let receiver: unknown;
   const client = new BackendClient(

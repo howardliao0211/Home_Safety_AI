@@ -2,7 +2,7 @@ import json
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Header, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Response, UploadFile
 from pydantic import TypeAdapter, ValidationError
 
 from app.annotations.service import public_annotation
@@ -105,6 +105,16 @@ def create_assessment(
 @router.get("/v1/assessments/latest")
 def latest_assessment(svc: Service, device: Owner):
     return public(svc.latest(device))
+
+
+@router.get("/v1/assessments")
+def assessment_history(
+    svc: Service,
+    device: Owner,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: Annotated[str | None, Query(min_length=1, max_length=2048)] = None,
+):
+    return svc.history(device, limit, cursor)
 
 
 @router.get("/v1/assessments/{assessment_id}")

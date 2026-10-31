@@ -70,6 +70,21 @@ class MemoryRepository:
                 self.records[key] = Assessment.model_validate_json(updated.model_dump_json())
             return copy.deepcopy(updated)
 
+    def history(self, owner_uid, limit, after=None):
+        with self.lock:
+            records = sorted(
+                (
+                    a
+                    for (owner, _), a in self.records.items()
+                    if owner == owner_uid and not a.deleting
+                ),
+                key=lambda a: (a.created_at, a.id),
+                reverse=True,
+            )
+            if after:
+                records = [a for a in records if (a.created_at, a.id) < after]
+            return copy.deepcopy(records[:limit])
+
     def annotation_pending(self):
         return [copy.deepcopy(a) for a in self.records.values() if a.annotation_dispatch_pending]
 

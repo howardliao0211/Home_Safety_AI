@@ -7,6 +7,7 @@ import type {
   Profile,
   Submission,
 } from "../domain/model";
+import type { HistoryItem } from "../domain/history";
 
 type RemotePhoto = { id: string; uploaded: boolean };
 type RemoteOperation = {
@@ -33,6 +34,7 @@ type RemoteFinding = Omit<
 };
 export type RemoteAssessment = RemoteOperation & {
   id: string;
+  title?: string | null;
   created_at: string;
   photo: RemotePhoto;
   profiles: Profile[];
@@ -60,6 +62,7 @@ export function fromServer(
 ): Assessment {
   return {
     id: remote.id,
+    title: remote.title || undefined,
     createdAt: remote.created_at,
     profiles: remote.profiles,
     status: remote.status,
@@ -223,6 +226,43 @@ export class BackendClient {
   }
   get(assessment: Assessment) {
     return this.assessment(`/v1/assessments/${assessment.id}`, assessment);
+  }
+  async open(id: string, cached?: Assessment) {
+    const restored = await this.assessment(`/v1/assessments/${id}`, cached);
+    // Opening a retained upload must never initiate analysis automatically.
+    if (restored.status === "ready") {
+      restored.status = "failed";
+      restored.error =
+        "This assessment has unfinished analysis. Your input is saved. Retry when ready.";
+    }
+    return restored;
+  }
+  async history(
+    cursor?: string,
+  ): Promise<{ items: HistoryItem[]; nextCursor?: string }> {
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+    const page: {
+      items: {
+        id: string;
+        title?: string | null;
+        created_at: string;
+        status: Assessment["status"];
+        open_count: number | null;
+        photo: RemotePhoto;
+      }[];
+      next_cursor: string | null;
+    } = await (await this.request(`/v1/assessments${query}`)).json();
+    return {
+      items: page.items.map((item) => ({
+        id: item.id,
+        title: item.title || undefined,
+        createdAt: item.created_at,
+        status: item.status,
+        openCount: item.open_count,
+        photo: photoFromServer(item.photo, item.id),
+      })),
+      nextCursor: page.next_cursor || undefined,
+    };
   }
   async upload(assessment: Assessment) {
     if (assessment.serverSaved && assessment.photo.serverUploaded)

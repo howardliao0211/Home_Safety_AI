@@ -99,7 +99,8 @@ professional home safety inspection.”
 - Account scope: managed Identity Platform/Firebase email/password accounts with
   verified email. Firebase UID owns assessments, photos, submissions and highlights.
   The same account reopens its latest assessment across Android/iOS installations;
-  live synchronization and a history browser remain excluded. Account namespaces
+  Home lists retained assessments through account-scoped paginated history;
+  live synchronization remains excluded. Account namespaces
   are separate from legacy device data, which is never automatically imported.
   See `docs/authentication.md` for authentication, persistence and deletion.
 - Photo retention: retain initial, follow-up, and user-review photos with their
@@ -143,13 +144,16 @@ a no-hazards result.
 - Required: photo input, structured findings, linked follow-up, checklist state,
   restart persistence, and phone-to-cloud connectivity.
 - Stretch goals, only if time remains after the required one-week scope:
-  photo annotations, basic scan history/comparison, and illustrative image redesign.
+  photo annotations, assessment comparisons, and illustrative image redesign.
   Annotations require reliable localisation and validated normalised coordinates;
   redesign must never be presented as a validated safety improvement.
-- Persist the current assessment across restarts without requiring a history screen.
+- Persist assessment and draft state across restarts. Home is the default entry
+  point, with previous assessments listed newest first and one local draft available
+  to resume. See `.scratch/home-history/spec.md` for the launch, Home and history flow.
 - Starting a new assessment retains earlier assessments and their photos.
-  The MVP reopens the latest assessment; browsing earlier assessments remains
-  a stretch goal with the history screen.
+  Users can reopen earlier assessments from Home with all existing checklist actions.
+  An assessment title is generated with the initial analysis and retained on the
+  backend; missing titles display as “Room assessment” with the creation date.
 - Excluded: 3D/floor-plan mapping, shopping, contractor booking, and live surveillance.
 - No separate `evals/` directory or evaluation framework for this MVP. Record
   manual demo checks and observed failure cases in `docs/demo.md` when needed.

@@ -2,19 +2,36 @@ import { AuthProvider, useAuth } from "@/auth/context";
 import { AuthScreen } from "@/auth/screen";
 import { apiEnabled } from "@/api/config";
 import { useEffect, useState } from "react";
-import {
-  AccessibilityInfo,
-  ActivityIndicator,
-  Pressable,
-  Text,
-  View,
-} from "react-native";
+import { AccessibilityInfo, Pressable, Text, View } from "react-native";
 import { Stack, router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { ThemeProvider, DefaultTheme } from "expo-router/react-navigation";
 import { PreviewProvider, usePreview } from "@/hooks/preview-context";
 import { Button, Copy } from "@/components/ui";
 import { colors } from "@/components/theme";
+import { LaunchScreen } from "@/components/brand";
+import * as SplashScreen from "expo-splash-screen";
+
+// Reveal the branded React loading/error surface as soon as its first frame exists.
+void SplashScreen.preventAutoHideAsync();
+
+function HomeLink() {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Back to Home"
+      onPress={() => router.dismissTo("/")}
+      style={{
+        minWidth: 48,
+        minHeight: 48,
+        justifyContent: "center",
+        paddingRight: 12,
+      }}
+    >
+      <Text style={{ color: colors.accent, fontSize: 16 }}>Home</Text>
+    </Pressable>
+  );
+}
 
 function Navigation() {
   const auth = useAuth();
@@ -37,15 +54,7 @@ function Navigation() {
   }, [ready]);
   if (!ready)
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          padding: 28,
-          gap: 20,
-          backgroundColor: colors.background,
-        }}
-      >
+      <LaunchScreen loading={!error}>
         <Copy kind="heading">
           {error
             ? apiEnabled
@@ -69,10 +78,8 @@ function Navigation() {
               disabled={busy}
             />
           </>
-        ) : (
-          <ActivityIndicator color={colors.accent} />
-        )}
-      </View>
+        ) : null}
+      </LaunchScreen>
     );
   return (
     <Stack
@@ -108,7 +115,7 @@ function Navigation() {
     >
       <Stack.Screen
         name="index"
-        options={{ title: "Home Safety", headerBackVisible: false }}
+        options={{ title: "Home Safety AI", headerBackVisible: false }}
       />
       <Stack.Screen name="account" options={{ title: "Account" }} />
       <Stack.Screen name="capture" options={{ title: "Your room" }} />
@@ -118,8 +125,7 @@ function Navigation() {
         options={{
           title: "Room assessment",
           headerBackVisible: false,
-          headerLeft: () => null,
-          gestureEnabled: false,
+          headerLeft: () => <HomeLink />,
         }}
       />
       <Stack.Screen
@@ -127,7 +133,7 @@ function Navigation() {
         options={{
           title: "Your checklist",
           headerBackVisible: false,
-          headerLeft: () => null,
+          headerLeft: () => <HomeLink />,
         }}
       />
       <Stack.Screen
@@ -194,15 +200,7 @@ function AuthGate() {
   const auth = useAuth();
   if (apiEnabled && !auth.ready)
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          padding: 24,
-          backgroundColor: colors.background,
-        }}
-      >
-        {!auth.bootstrapError && <ActivityIndicator color={colors.accent} />}
+      <LaunchScreen loading={!auth.bootstrapError}>
         <Copy>{auth.message || "Opening your account…"}</Copy>
         {auth.bootstrapError && (
           <Pressable
@@ -215,7 +213,7 @@ function AuthGate() {
             </Text>
           </Pressable>
         )}
-      </View>
+      </LaunchScreen>
     );
   if (
     apiEnabled &&
@@ -229,8 +227,13 @@ function AuthGate() {
 }
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <AuthGate />
-    </AuthProvider>
+    <View
+      style={{ flex: 1, backgroundColor: colors.background }}
+      onLayout={() => SplashScreen.hide()}
+    >
+      <AuthProvider>
+        <AuthGate />
+      </AuthProvider>
+    </View>
   );
 }

@@ -1,6 +1,7 @@
 import os
 import time
 from collections.abc import Callable
+from datetime import datetime
 from typing import Protocol
 
 from google.api_core.exceptions import Aborted, FailedPrecondition, NotFound
@@ -19,6 +20,9 @@ Mutation = Callable[[Assessment | None], Assessment | None]
 class AssessmentRepository(Protocol):
     def get(self, owner_uid: str, assessment_id: str) -> Assessment | None: ...
     def latest(self, owner_uid: str) -> Assessment | None: ...
+    def history(
+        self, owner_uid: str, limit: int, after: tuple[datetime, str] | None = None
+    ) -> list[Assessment]: ...
     def mutate(
         self, owner_uid: str, assessment_id: str, change: Mutation, *, deadline: float | None = None
     ) -> Assessment | None:
@@ -66,6 +70,31 @@ class FirestoreRepository:
             if not result.deleting:
                 return result
         return None
+
+    def history(self, owner_uid, limit, after=None):
+        self.accounts.require_active(owner_uid)
+        collection = self.collection(owner_uid)
+        query = collection.order_by("created_at", direction="DESCENDING").order_by(
+            "__name__", direction="DESCENDING"
+        )
+        if after:
+            query = query.start_after(
+                {"created_at": after[0], "__name__": collection.document(after[1])}
+            )
+        records = []
+        # Deleting records do not consume page slots. Continue in bounded batches.
+        while len(records) < limit:
+            snapshots = list(query.limit(limit).stream(timeout=10))
+            for snapshot in snapshots:
+                assessment = Assessment.model_validate(snapshot.to_dict())
+                if not assessment.deleting:
+                    records.append(assessment)
+                    if len(records) == limit:
+                        return records
+            if len(snapshots) < limit:
+                break
+            query = query.start_after(snapshots[-1])
+        return records
 
     def mutate(
         self, owner_uid: str, assessment_id: str, change: Mutation, *, deadline: float | None = None

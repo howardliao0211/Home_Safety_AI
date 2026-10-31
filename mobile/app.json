@@ -11,7 +11,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#f7f6f1",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -24,6 +24,7 @@
       "output": "single"
     },
     "plugins": [
+      ["expo-splash-screen", {"backgroundColor": "#f7f6f1", "image": "./assets/splash-icon.png", "imageWidth": 104}],
       "expo-router",
       "expo-image",
       [
