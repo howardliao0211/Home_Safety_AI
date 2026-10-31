@@ -293,6 +293,7 @@ export function PhotoView({
   onInvalid?: () => void;
 }) {
   const [failed, setFailed] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState(4 / 3);
   const [remoteUri, setRemoteUri] = useState<string>();
   const [preferRemote, setPreferRemote] = useState(false);
   const { loadRemotePhoto } = usePreview();
@@ -347,11 +348,15 @@ export function PhotoView({
         accessibilityLabel={photo.label}
         style={{
           width: "100%",
-          aspectRatio: compact ? 2.7 : 1.5,
+          aspectRatio: compact ? 2.7 : aspectRatio,
           borderRadius: tokens.radius,
           backgroundColor: colors.warm,
         }}
-        contentFit="cover"
+        contentFit={compact ? "cover" : "contain"}
+        onLoad={({ source }) => {
+          if (source.width > 0 && source.height > 0)
+            setAspectRatio(source.width / source.height);
+        }}
         onError={() => {
           if (photo.remote && !needsRemote) {
             setPreferRemote(true);
