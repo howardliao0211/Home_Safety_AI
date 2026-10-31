@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { apiEnabled } from "@/api/config";
@@ -7,6 +7,7 @@ import { usePreview } from "@/hooks/preview-context";
 import type { Annotation, Assessment, Finding } from "@/domain/model";
 import { Button, Copy } from "@/components/ui";
 import { EvidencePhoto } from "@/components/evidence-photo";
+import { SeverityLegend } from "@/components/checklist-photo";
 
 const ACTIVE = ["queued", "processing"];
 
@@ -30,7 +31,7 @@ export function FindingHighlight({
   finding: Finding;
   historical?: Annotation;
 }) {
-  const { annotationClient, refreshAssessment } = usePreview();
+  const { annotationClient, refreshAssessment, loadMask } = usePreview();
   const revision = historical?.revision || finding.contentRevision || "initial";
   const saved = historical || finding.annotation || null;
   const [annotation, setAnnotation] = useState<Annotation | null>(saved);
@@ -64,9 +65,7 @@ export function FindingHighlight({
         value.orientation === 1
       ) {
         try {
-          const uri = await (
-            await annotationClient()
-          ).maskDataUrl(assessment.id, finding.id, value.id);
+          const uri = await loadMask(assessment, finding, value.id);
           if (token === generation.current) setMask(uri);
         } catch (e) {
           if (token === generation.current)
@@ -78,8 +77,13 @@ export function FindingHighlight({
       }
       return true;
     },
-    [assessment.id, finding.id],
+    [assessment.id, finding.id, finding.severity],
   );
+  // Preview highlights are simulated local state; show them as they change.
+  const previewAnnotation = apiEnabled ? undefined : saved;
+  useEffect(() => {
+    if (previewAnnotation) void apply(previewAnnotation, ++generation.current);
+  }, [previewAnnotation?.id, previewAnnotation?.state]);
   useFocusEffect(
     useCallback(() => {
       const token = ++generation.current;
@@ -95,6 +99,10 @@ export function FindingHighlight({
         timer = undefined;
       };
       const check = async () => {
+        if (!apiEnabled) {
+          if (last && token === generation.current) void apply(last, token);
+          return;
+        }
         // One read at a time per attempt, and only while the screen is visible.
         if (
           !apiEnabled ||
@@ -213,16 +221,35 @@ export function FindingHighlight({
             ? { width: current.width, height: current.height }
             : undefined
         }
-        mask={
-          sourcePhoto && current?.state === "ready" && !hidden
-            ? mask
-            : undefined
+        masks={
+          sourcePhoto && current?.state === "ready" && !hidden && mask
+            ? [
+                {
+                  key: current.id || "mask",
+                  uri: mask,
+                  width: current.width || undefined,
+                  height: current.height || undefined,
+                },
+              ]
+            : []
         }
       />
+      {current?.state === "ready" && (
+        <SeverityLegend only={historical ? undefined : finding.severity} />
+      )}
       {!apiEnabled ? (
-        <Copy kind="small">
-          Object highlighting is unavailable in preview mode.
-        </Copy>
+        <>
+          <Copy kind="small" accessibilityLiveRegion="polite">
+            {current ? `Simulated highlight · ${status}` : status}
+          </Copy>
+          {current?.state === "ready" && (
+            <Button
+              label={hidden ? "Show highlights" : "Hide highlights"}
+              variant="text"
+              onPress={() => setHidden((value) => !value)}
+            />
+          )}
+        </>
       ) : (
         <>
           <Copy kind="small" accessibilityLiveRegion="polite">

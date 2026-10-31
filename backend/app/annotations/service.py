@@ -9,7 +9,7 @@ from datetime import timedelta
 from PIL import Image
 
 from app.annotations.budget import bounded_cpu, remaining
-from app.annotations.provider import choose, mask_overlay
+from app.annotations.provider import choose, mask_overlay, recolor
 from app.assessments.service import finding_in, require
 from app.errors import AppError
 from app.models.schemas import Annotation, EvidenceSnapshot, FindingContent, Photo, new_id, now
@@ -61,6 +61,14 @@ def public_annotation(job):
     # Legacy attempts have no saved prompt, and retry never asks the main model again.
     result["retryable"] = job.prompt is not None
     return result
+
+
+def revision_severity(finding, revision):
+    """Historical highlights use their saved revision's severity, not current content."""
+    if revision == finding.content_revision:
+        return finding.severity
+    saved = next((s for s in finding.evidence_history if s.revision == revision), None)
+    return saved.content.severity if saved else finding.severity
 
 
 def annotation_in(assessment, finding_id, annotation_id):
@@ -223,10 +231,12 @@ class AnnotationService:
         return public_annotation(next(j for j in a.annotations if j.id == annotation_id))
 
     def mask(self, device, assessment_id, finding_id, annotation_id):
-        job = self.get(device, assessment_id, finding_id, annotation_id)
+        assessment = require(self.repository.get(device, assessment_id))
+        job = annotation_in(assessment, finding_id, annotation_id)
         if job.state != "ready" or not job.mask:
             raise AppError(404, "not_found", "Published highlight not found.")
-        return self.photos.get(device, assessment_id, job.mask)
+        data = self.photos.get(device, assessment_id, job.mask)
+        return recolor(data, revision_severity(finding_in(assessment, finding_id), job.revision))
 
     def work(self, device, assessment_id, annotation_id):
         """One durable delivery advances one never-started attempt.

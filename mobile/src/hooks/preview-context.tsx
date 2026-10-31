@@ -12,6 +12,12 @@ import {
   type Conversation,
 } from "@/domain/chat";
 import { fixtureSuggestions, previewService } from "@/api/preview-service";
+import {
+  previewMaskUri,
+  STAGED_DELAY_MS,
+  STAGED_FINDING,
+  withPreviewHighlights,
+} from "@/api/preview-highlights";
 import { ApiError, BackendClient } from "@/api/backend-client";
 import { apiConfig, apiEnabled } from "@/api/config";
 import { appendPhoto } from "@/api/photo-upload";
@@ -392,7 +398,10 @@ function usePreviewState(session: Session) {
             await saveServer(await api.analyze(uploaded));
             return;
           }
-          const findings = await previewService.assess(assessment);
+          const findings = withPreviewHighlights(
+            assessment,
+            await previewService.assess(assessment),
+          );
           await editAssessment(id, (a) => ({
             ...a,
             status: "complete",
@@ -414,6 +423,19 @@ function usePreviewState(session: Session) {
               : { suggestions: fixtureSuggestions(a, findings) }),
             error: undefined,
           }));
+          // A simulated highlight that finishes after its siblings.
+          setTimeout(() => {
+            if (!sessionActive.current) return;
+            void editFinding(id, STAGED_FINDING, (f) =>
+              f.annotation?.state === "processing"
+                ? {
+                    ...f,
+                    annotation: { ...f.annotation, state: "ready" },
+                    annotations: [{ ...f.annotation, state: "ready" }],
+                  }
+                : f,
+            ).catch(() => {});
+          }, STAGED_DELAY_MS);
         } catch (e) {
           if (apiEnabled) {
             await retainFailure(id, e);
@@ -798,6 +820,15 @@ function usePreviewState(session: Session) {
       return save(conversation);
     },
     annotationClient: backend,
+    /** Server masks arrive tinted by severity; preview draws simulated ones. */
+    loadMask: async (
+      assessment: Assessment,
+      finding: Finding,
+      annotationId: string,
+    ) =>
+      apiEnabled
+        ? (await backend()).maskDataUrl(assessment.id, finding.id, annotationId)
+        : previewMaskUri(assessment.photo, finding),
     loadAssessment: (id: string) =>
       act(async () => {
         const cached = repository.state.assessments.find((a) => a.id === id);

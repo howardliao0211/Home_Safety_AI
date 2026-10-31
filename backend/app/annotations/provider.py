@@ -235,3 +235,29 @@ class MuseHighlightProvider:
 
 def mask_overlay(mask):
     return png(highlight(mask))
+
+
+# Fill/outline colour and a darker rim per severity. Stored masks keep their
+# original orange rendering; colour is applied when served, so existing masks
+# change colour without another segmentation request or attempt.
+SEVERITY_COLORS = {
+    "High": ((220, 38, 38), (110, 15, 15)),  # Red
+    "Medium": ((250, 204, 21), (100, 75, 0)),  # Yellow
+    "Low": ((22, 163, 74), (10, 70, 30)),  # Green
+}
+
+
+def recolor(data, severity):
+    """Tint a stored RGBA highlight PNG, keeping its alpha (geometry) unchanged.
+
+    Bright pixels (the fill and outline) take the severity colour; dark pixels
+    (the outline rim) take its darker shade.
+    """
+    color, rim = SEVERITY_COLORS[severity]
+    with Image.open(io.BytesIO(data)) as source:
+        image = source.convert("RGBA")
+    bright = image.getchannel("R").point(lambda value: 255 if value >= 128 else 0)
+    tinted = Image.new("RGB", image.size, rim)
+    tinted.paste(color, mask=bright)
+    tinted.putalpha(image.getchannel("A"))
+    return png(tinted)

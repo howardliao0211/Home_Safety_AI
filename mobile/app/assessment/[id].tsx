@@ -13,12 +13,12 @@ import {
   Disclaimer,
   Notice,
   Panel,
-  PhotoView,
   PreviewNotice,
   Screen,
   styles,
 } from "@/components/ui";
 import { AssessmentSummary } from "@/components/suggestions";
+import { ChecklistPhoto } from "@/components/checklist-photo";
 import { AssessmentGate } from "@/components/assessment-gate";
 import { NewAssessmentButton } from "@/components/new-assessment-button";
 import { colors } from "@/components/theme";
@@ -64,7 +64,7 @@ function AssessmentScreen() {
               : "This sample returned no obvious visible hazards. It is not a declaration that the room is safe."}
         </Copy>
       </View>
-      <PhotoView photo={assessment.photo} compact />
+      <ChecklistPhoto assessment={assessment} />
       <AssessmentSummary assessment={assessment} />
       <Copy kind="small">
         {new Date(assessment.createdAt).toLocaleDateString("en-AU", {

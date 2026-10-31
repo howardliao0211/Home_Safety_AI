@@ -49,9 +49,11 @@ export const scenarios: { id: Scenario; title: string; description: string }[] =
 export type Photo = {
   id: string;
   label: string;
-  sample?: "living" | "quiet";
+  sample?: import("./samples").Sample;
   uri?: string;
   remote?: { assessmentId: string; photoId: string };
+  /** Server SHA-256 of the normalized stored photo, matched against highlight sources. */
+  digest?: string;
   serverUploaded?: boolean;
 };
 export type Draft = {
@@ -207,6 +209,14 @@ export function recoverInterrupted(state: AppState): AppState {
         : {}),
       findings: a.findings.map((f) => ({
         ...f,
+        // A simulated highlight interrupted by restart finishes on reload.
+        ...(f.annotation?.id?.startsWith("preview-") &&
+        f.annotation.state === "processing"
+          ? {
+              annotation: { ...f.annotation, state: "ready" as const },
+              annotations: [{ ...f.annotation, state: "ready" as const }],
+            }
+          : {}),
         localChat: f.localChat?.preview
           ? {
               ...f.localChat,
@@ -278,6 +288,7 @@ export type Annotation = {
   confidence?: number | null;
   photo_id?: string | null;
   photo_kind?: "original" | "follow-up" | "review" | null;
+  image_digest?: string | null;
   width?: number | null;
   height?: number | null;
   orientation?: 1;

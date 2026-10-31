@@ -18,3 +18,9 @@ export const tokens = {
   space: 20,
   maxWidth: 700,
 };
+/** Highlight fill and darker outline per finding severity (matches the backend tint). */
+export const severityColors = {
+  High: { fill: "#dc2626", rim: "#6e0f0f", name: "Red" },
+  Medium: { fill: "#facc15", rim: "#644b00", name: "Yellow" },
+  Low: { fill: "#16a34a", rim: "#0a461e", name: "Green" },
+} as const;

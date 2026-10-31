@@ -198,6 +198,11 @@ one main visible object in the initial assessment photo for an initial finding.
 The assessment names the object with a short segmentation prompt; SAM supplies
 the mask. It helps locate evidence, may mark the wrong instance, and does not
 verify safety, anchoring, or resolution.
+Highlights are tinted by the finding's severity when served (High red, Medium
+yellow, Low green; historical highlights use their revision's severity), including
+masks stored before colours existed. The checklist photo overlays the latest ready,
+current-revision, original-photo highlight of each open finding; translucent
+overlaps blend and carry no extra meaning. Missing highlights never mean "safe".
 
 **Highlight attempt**: One prompt-based segmentation of a saved prompt and photo,
 with a persisted outcome. Initial attempts start when the assessment completes and

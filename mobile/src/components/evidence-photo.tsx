@@ -6,27 +6,40 @@ import { Copy } from "@/components/ui";
 import type { Photo } from "@/domain/model";
 import { roomSources } from "@/domain/samples";
 
-/** Both layers occupy one source-aspect canvas, so the mask stays aligned. */
+export type MaskLayer = {
+  key: string;
+  uri: string;
+  /** Source pixel size the mask was made for; must match the displayed photo. */
+  width?: number;
+  height?: number;
+};
+
+/**
+ * The photo and every mask occupy one source-aspect canvas with `contain`, so
+ * each overlay is fitted to the same image rectangle and stays aligned at any
+ * width, after rotation and with text scaling. Portrait photos are never cropped.
+ */
 export function EvidencePhoto({
   photo,
-  mask,
+  masks = [],
   dimensions,
+  caption = photo.label,
 }: {
   photo: Photo;
-  mask?: string;
+  masks?: MaskLayer[];
   dimensions?: { width: number; height: number };
+  caption?: string;
 }) {
   const { loadRemotePhoto } = usePreview();
   const [source, setSource] = useState<string>();
   const [error, setError] = useState(false);
-  const [ratio, setRatio] = useState(
-    dimensions ? dimensions.width / dimensions.height : 1,
-  );
+  const [natural, setNatural] = useState<{ width: number; height: number }>();
   const [width, setWidth] = useState(300);
   useEffect(() => {
     let active = true;
     setSource(undefined);
     setError(false);
+    setNatural(undefined);
     // Saved normalized evidence is essential: a cached camera original can have
     // different orientation/dimensions from the server's source-aligned mask.
     if (photo.remote) {
@@ -47,6 +60,17 @@ export function EvidencePhoto({
     : photo.sample
       ? roomSources[photo.sample]
       : undefined;
+  const size = natural ?? dimensions;
+  const ratio = size ? size.width / size.height : 4 / 3;
+  // Masks made for another image size would be misaligned; omit them.
+  const aligned = natural
+    ? masks.filter(
+        (m) =>
+          !m.width ||
+          !m.height ||
+          (m.width === natural.width && m.height === natural.height),
+      )
+    : [];
   const canvas = (
     <View style={{ width, height: width / ratio }}>
       {!!imageSource && (
@@ -56,22 +80,27 @@ export function EvidencePhoto({
           contentFit="contain"
           accessibilityLabel={photo.label}
           style={{ width: "100%", height: "100%" }}
-          onLoad={(event) => {
-            if (!dimensions) setRatio(event.source.width / event.source.height);
-          }}
+          onLoad={(event) =>
+            setNatural({
+              width: event.source.width,
+              height: event.source.height,
+            })
+          }
           onError={() => setError(true)}
         />
       )}
-      {!!mask && !error && (
-        <Image
-          cachePolicy="none"
-          source={{ uri: mask }}
-          contentFit="contain"
-          accessibilityLabel="AI-generated highlight"
-          pointerEvents="none"
-          style={{ position: "absolute", width: "100%", height: "100%" }}
-        />
-      )}
+      {!error &&
+        aligned.map((mask) => (
+          <Image
+            key={mask.key}
+            cachePolicy="none"
+            source={{ uri: mask.uri }}
+            contentFit="contain"
+            accessible={false}
+            pointerEvents="none"
+            style={{ position: "absolute", width: "100%", height: "100%" }}
+          />
+        ))}
     </View>
   );
   return (
@@ -80,13 +109,13 @@ export function EvidencePhoto({
       onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
     >
       {error ? (
-        <Copy>Photo unavailable. Your finding remains saved.</Copy>
+        <Copy>Photo unavailable. Your findings remain saved.</Copy>
       ) : imageSource ? (
         canvas
       ) : (
         <Copy>Loading saved photo…</Copy>
       )}
-      <Copy kind="small">{photo.label}</Copy>
+      {!!caption && <Copy kind="small">{caption}</Copy>}
     </View>
   );
 }

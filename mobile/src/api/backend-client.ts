@@ -9,7 +9,7 @@ import type {
 } from "../domain/model";
 import type { HistoryItem } from "../domain/history";
 
-type RemotePhoto = { id: string; uploaded: boolean };
+type RemotePhoto = { id: string; uploaded: boolean; sha256?: string };
 type RemoteOperation = {
   status: Assessment["status"];
   attempts: number;
@@ -55,6 +55,7 @@ function photoFromServer(
     ...cached,
     id: photo.id,
     label: cached?.label || "Your saved room photo",
+    ...(photo.sha256 ? { digest: photo.sha256 } : {}),
     remote: { assessmentId, photoId: photo.id },
     serverUploaded: photo.uploaded,
   };

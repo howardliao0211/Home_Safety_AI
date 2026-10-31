@@ -276,6 +276,10 @@ routes use the normal bearer token and `X-Device-ID`:
   PNG overlay with translucent fill and outline; available only for ready,
   unreported results. The metadata binds it to the exact photo digest, upright
   orientation (`1`), width and height. Regions use top-left normalized coordinates.
+  The overlay is tinted when served by the finding's severity for that attempt's
+  revision: High red, Medium yellow, Low green, each with a darker rim. Stored
+  masks (including older orange ones) are unchanged; recolouring makes no SAM
+  request and creates no attempt or revision.
 - `POST .../annotations/{id}/feedback` accepts `{ "kind": "wrong_object" }` and
   persistently hides the annotation without modifying finding/checklist state.
 

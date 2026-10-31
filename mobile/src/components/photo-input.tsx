@@ -3,6 +3,7 @@ import { Linking, Pressable, View } from "react-native";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { makeId, type Photo } from "@/domain/model";
+import { sampleNames, type Sample } from "@/domain/samples";
 import { usePreview } from "@/hooks/preview-context";
 import { colors } from "@/components/theme";
 import { apiEnabled } from "@/api/config";
@@ -151,12 +152,12 @@ export function PhotoInput({
         </Notice>
       )}
       <Copy kind="eyebrow">OR EXPLORE WITH A SAMPLE</Copy>
-      <View style={{ flexDirection: "row", gap: 12 }}>
-        {(["living", "quiet"] as const).map((sample, index) => (
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+        {(Object.keys(sampleNames) as Sample[]).map((sample) => (
           <Pressable
             key={sample}
             accessibilityRole="button"
-            accessibilityLabel={`Use ${index ? "quiet room" : "living room"} sample`}
+            accessibilityLabel={`Use ${sampleNames[sample].toLowerCase()} sample`}
             aria-pressed={photo?.sample === sample}
             aria-disabled={busy || picking}
             accessibilityState={{
@@ -168,12 +169,13 @@ export function PhotoInput({
               setError(undefined);
               void onChange({
                 id: makeId(),
-                label: index ? "Quiet room sample" : "Living room sample",
+                label: `${sampleNames[sample]} sample`,
                 sample,
               });
             }}
             style={({ pressed }) => ({
-              flex: 1,
+              flexGrow: 1,
+              flexBasis: 140,
               opacity: pressed ? 0.75 : 1,
               borderRadius: 12,
               borderWidth: 2,
@@ -196,7 +198,7 @@ export function PhotoInput({
                 kind="small"
                 style={{ color: colors.ink, fontWeight: "600" }}
               >
-                {index ? "Quiet room" : "Living room"}
+                {sampleNames[sample]}
                 {photo?.sample === sample ? " · Selected" : ""}
               </Copy>
             </View>
