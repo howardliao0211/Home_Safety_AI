@@ -156,6 +156,43 @@ class LifecycleTests(unittest.TestCase):
         notes = " ".join(str(call.args[0]) for call in output.call_args_list)
         self.assertIn("highlights stay queued", notes)
 
+    def frontend_env(self):
+        pid = local.load_process("frontend")["pid"]
+        raw = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+        return dict(item.decode().split("=", 1) for item in raw if b"=" in item)
+
+    def test_preview_starts_only_frontend_in_preview_mode(self):
+        (self.root / ".env").unlink()
+        local.start(preview=True)
+        self.assertIsNone(local.load_process("backend"))
+        self.assertIsNone(local.load_process("worker"))
+        self.assertEqual(local.load_process("frontend")["mode"], "preview")
+        env = self.frontend_env()
+        self.assertEqual(env["EXPO_PUBLIC_DATA_SOURCE"], "preview")
+        self.assertNotIn("EXPO_PUBLIC_API_URL", env)
+        self.assertFalse((self.root / "docker.log").exists())
+        record = local.load_process("frontend")
+        with patch("builtins.print") as output:
+            local.start(preview=True)
+        self.assertEqual(record, local.load_process("frontend"))
+        self.assertIn("preview mode", str(output.call_args.args[0]))
+        local.stop()
+        self.assertIsNone(local.load_process("frontend"))
+
+    def test_api_start_selects_api_mode(self):
+        local.start()
+        self.assertEqual(local.load_process("frontend")["mode"], "api")
+        self.assertEqual(self.frontend_env()["EXPO_PUBLIC_DATA_SOURCE"], "api")
+
+    def test_mode_switch_requires_stop(self):
+        local.start(preview=True)
+        with self.assertRaisesRegex(RuntimeError, "Run stop"):
+            local.start()
+        local.stop()
+        local.start()
+        with self.assertRaisesRegex(RuntimeError, "Run stop"):
+            local.start(preview=True)
+
     def test_stale_record_does_not_kill_unrelated_process(self):
         process = subprocess.Popen(
             [sys.executable, "-c", "import time; time.sleep(60)"],

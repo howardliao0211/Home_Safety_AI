@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Start or stop local storage, FastAPI, the highlight worker, and Expo (Linux/WSL)."""
+"""Start or stop local storage, FastAPI, the highlight worker, and Expo (Linux/WSL).
+
+With --preview, start only Expo using simulated preview data.
+"""
 
 import argparse
 import fcntl
@@ -79,7 +82,7 @@ def compose(*args):
     )
 
 
-def launch(name, command, directory, env=None):
+def launch(name, command, directory, env=None, mode=None):
     with (STATE / f"{name}.log").open("ab") as log:
         process = subprocess.Popen(
             command,
@@ -91,6 +94,8 @@ def launch(name, command, directory, env=None):
             env=env,
         )
     record = {"pid": process.pid, "started": identity(process.pid)}
+    if mode:
+        record["mode"] = mode
     (STATE / f"{name}.json").write_text(json.dumps(record))
     return process
 
@@ -119,16 +124,25 @@ def wait_ready(name, process, path, timeout=120):
     )
 
 
-def start():
-    running = [name for name in PORTS if load_process(name)]
-    if len(running) == len(PORTS):
-        print(f"Already running. Open http://localhost:{PORTS['frontend']}")
-        return
+def start(preview=False):
+    mode = "preview" if preview else "api"
+    needed = ["frontend"] if preview else list(PORTS)
+    running = {name: load_process(name) for name in PORTS if load_process(name)}
     if running:
+        frontend = running.get("frontend")
+        # Records written before modes existed belong to the full API stack.
+        if set(running) == set(needed) and frontend.get("mode", "api") == mode:
+            print(
+                f"Already running ({mode} mode). "
+                f"Open http://localhost:{PORTS['frontend']}"
+            )
+            return
         raise RuntimeError(
-            "Only part of the managed stack is running. Run stop, then start again."
+            "A different or partial managed stack is running. "
+            "Run stop, then start again."
         )
-    for name, port in PORTS.items():
+    for name in needed:
+        port = PORTS[name]
         with socket.socket() as probe:
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
@@ -138,6 +152,9 @@ def start():
                     f"Port {port} ({name}) is occupied. Stop the existing server first; "
                     "this script will not stop an unmanaged process."
                 ) from error
+    if preview:
+        start_preview()
+        return
     for tool in ("docker", "bash"):
         if not shutil.which(tool):
             raise RuntimeError(
@@ -194,22 +211,13 @@ def start():
         )
         started.append("worker")
         print("Starting frontend…", flush=True)
-        frontend = launch(
-            "frontend",
-            [
-                "bash",
-                "-c",
-                'source "$1"; exec npm run web -- --localhost --port "$2"',
-                "local-test",
-                str(ROOT / "scripts/frontend-env.sh"),
-                str(PORTS["frontend"]),
-            ],
-            ROOT / "mobile",
-            env={
+        frontend = launch_frontend(
+            {
                 **os.environ,
                 "EXPO_PUBLIC_DATA_SOURCE": "api",
                 "EXPO_PUBLIC_API_URL": f"http://127.0.0.1:{PORTS['backend']}",
             },
+            "api",
         )
         started.append("frontend")
         wait_ready("frontend", frontend, "/")
@@ -236,6 +244,55 @@ def start():
     )
 
 
+def launch_frontend(env, mode):
+    return launch(
+        "frontend",
+        [
+            "bash",
+            "-c",
+            'source "$1"; exec npm run web -- --localhost --port "$2"',
+            "local-test",
+            str(ROOT / "scripts/frontend-env.sh"),
+            str(PORTS["frontend"]),
+        ],
+        ROOT / "mobile",
+        env=env,
+        mode=mode,
+    )
+
+
+def start_preview():
+    """Run only Expo with predefined results; no storage, API, worker or model."""
+    if not shutil.which("bash"):
+        raise RuntimeError("Missing bash. Complete README development setup first.")
+    if not (ROOT / "mobile/node_modules").is_dir():
+        raise RuntimeError("Install frontend dependencies using the README first.")
+    subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1"; command -v npm >/dev/null',
+            "local-test",
+            str(ROOT / "scripts/frontend-env.sh"),
+        ],
+        check=True,
+    )
+    print("Starting frontend in preview mode…", flush=True)
+    frontend = launch_frontend(
+        {**os.environ, "EXPO_PUBLIC_DATA_SOURCE": "preview"}, "preview"
+    )
+    try:
+        wait_ready("frontend", frontend, "/")
+    except BaseException:
+        stop_process("frontend")
+        raise
+    print(
+        f"Ready (preview mode, simulated results): http://localhost:{PORTS['frontend']}\n"
+        f"Logs: {STATE}\n"
+        "Stop: python3 scripts/local-test.py stop"
+    )
+
+
 def stop():
     for name in reversed(PROCESSES):
         stop_process(name)
@@ -246,6 +303,11 @@ def stop():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("start", "stop"))
+    parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="start only the frontend with simulated preview data",
+    )
     args = parser.parse_args()
     os.umask(0o077)
     STATE.mkdir(parents=True, exist_ok=True)
@@ -258,7 +320,7 @@ def main():
                 "Another local-test command is running. Try again after it finishes.\n",
             )
         try:
-            start() if args.command == "start" else stop()
+            start(args.preview) if args.command == "start" else stop()
         except (
             OSError,
             ValueError,

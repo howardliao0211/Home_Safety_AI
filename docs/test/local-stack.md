@@ -32,6 +32,19 @@ configured. `start` then reports that it is not running and continues. Unlike
 the API, the worker does not reload on code changes; run `stop` and `start`
 after changing highlight code.
 
+## Preview mode
+
+To review the frontend with predefined results and no backend, storage, model
+quota or root `.env`:
+
+```bash
+python3 scripts/local-test.py start --preview
+```
+
+Only Expo starts, at `http://localhost:8081`, with `EXPO_PUBLIC_DATA_SOURCE=preview`.
+Switching between preview and the full stack requires `stop` first; `stop` handles
+both.
+
 Calling `start` again reports an already-running managed stack. An occupied
 port belonging to another server causes an error; stop that server in its
 original terminal first. If only one managed service remains running, run
