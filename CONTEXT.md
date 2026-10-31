@@ -47,7 +47,11 @@ profiles, never as instructions. Stored as `household_context` /
 Each answer uses the original room photo, household context, current finding, earlier
 chat and completed historical discussion. Chat never changes findings or status.
 Only the authenticated backend reads/writes conversations in Firestore. Unsent drafts
-remain local and account-scoped. New follow-up/photo-review submissions are no longer
+remain local and account-scoped. Each reply is a durable **chat job** (queued, running,
+complete or failed) that runs in the backend worker independently of the app and
+streams its answer into one growing assistant message. A failed attempt keeps its
+partial text as an **Incomplete response**; an explicit Retry replaces it with a fresh
+answer to the same question. Incomplete text never enters later model context. New follow-up/photo-review submissions are no longer
 offered in the frontend; saved historical evidence remains viewable.
 
 **Follow-up**: Historical focused clarification or targeted photo evidence linked to
@@ -145,9 +149,9 @@ Keep API credentials and image payloads out of logs.
 On analysis failure, show the error and a Retry button in the app. Retain the
 submitted photo or text so a manual retry repeats the failed operation within
 the same assessment without duplicating findings. Preserve existing findings
-if chat or legacy evidence analysis fails. Persist accepted chat questions before
-generation; recover interrupted replies after a five-minute lease and require an
-explicit manual retry. Context/storage limits retain readable history and drafts. Automatic retries are outside the current MVP
+if chat or legacy evidence analysis fails. Persist accepted chat questions and their
+queued reply job together; recovery fails interrupted or unstarted jobs after bounded
+deadlines and requires an explicit manual retry, never restarting a model stream. Context/storage limits retain readable history and drafts. Automatic retries are outside the current MVP
 scope. A failed analysis must not be presented as a successful assessment or
 a no-hazards result.
 

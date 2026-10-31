@@ -12,6 +12,8 @@ export type MaskLayer = {
   /** Source pixel size the mask was made for; must match the displayed photo. */
   width?: number;
   height?: number;
+  /** Accessible name; unlabelled layers are decorative. */
+  label?: string;
 };
 
 /**
@@ -96,7 +98,8 @@ export function EvidencePhoto({
             cachePolicy="none"
             source={{ uri: mask.uri }}
             contentFit="contain"
-            accessible={false}
+            accessible={!!mask.label}
+            accessibilityLabel={mask.label}
             pointerEvents="none"
             style={{ position: "absolute", width: "100%", height: "100%" }}
           />

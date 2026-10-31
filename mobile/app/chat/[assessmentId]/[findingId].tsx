@@ -8,6 +8,7 @@ import {
 import {
   AccessibilityInfo,
   ActivityIndicator,
+  AppState,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -30,11 +31,16 @@ import {
 import { colors, tokens } from "@/components/theme";
 import { usePreview } from "@/hooks/preview-context";
 import {
+  isActive,
+  isIncomplete,
   MAX_CHAT_QUESTION,
+  mergeConversation,
   validateQuestion,
   type Conversation,
 } from "@/domain/chat";
 import { ApiError } from "@/api/backend-client";
+
+const POLL_MS = 1000;
 
 export default function ChatRoute() {
   const { assessmentId, findingId } = useLocalSearchParams<{
@@ -100,7 +106,7 @@ function Chat({ aid, fid }: { aid: string; fid: string }) {
         ?.findings.find((f) => f.id === fid)?.localChat?.outbound;
       const result = await latest.current.loadChat(aid, fid);
       if (mounted.current) {
-        setConversation(result);
+        setConversation((current) => mergeConversation(current, result));
         if (
           outbound &&
           result.turns.some((t) => t.id === outbound.id) &&
@@ -125,23 +131,46 @@ function Chat({ aid, fid }: { aid: string; fid: string }) {
       void load();
     }, [load]),
   );
-  // Poll saved state only. Reopening or polling never starts generation.
   const pending = conversation?.turns.find((t) => t.status !== "complete");
-  useEffect(() => {
-    if (pending?.status !== "running" || busy || loading || loadError) return;
-    const timer = setTimeout(() => void load(), 2000);
-    return () => clearTimeout(timer);
-  }, [pending?.status, conversation, busy, loading, loadError, load]);
+  const active = !!pending && isActive(pending);
+  // Observe the saved job while it is active, on this or a reopened screen.
+  // Reads never start generation; the backend job continues independently.
+  useFocusEffect(
+    useCallback(() => {
+      if (!active) return;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let stopped = false;
+      const tick = async () => {
+        if (stopped || AppState.currentState !== "active") return;
+        await load();
+        if (!stopped) timer = setTimeout(() => void tick(), POLL_MS);
+      };
+      timer = setTimeout(() => void tick(), POLL_MS);
+      const listener = AppState.addEventListener("change", (state) => {
+        clearTimeout(timer);
+        if (state === "active") void tick();
+      });
+      return () => {
+        stopped = true;
+        clearTimeout(timer);
+        listener.remove();
+      };
+    }, [active, load]),
+  );
+  // Phase changes only; the transcript is never re-read on each fragment.
   const announcement =
     draftError ||
     error ||
     loadError ||
-    (busy || pending?.status === "running"
-      ? "Preparing a reply…"
-      : pending?.error ||
-        (conversation?.turns.at(-1)?.status === "complete"
-          ? "Reply available."
-          : ""));
+    (pending?.status === "queued"
+      ? "Reply queued."
+      : pending?.status === "running"
+        ? "Writing a reply…"
+        : pending?.status === "failed"
+          ? `${isIncomplete(pending) ? "Incomplete response. " : ""}${pending.error ?? ""}`
+          : conversation?.turns.at(-1)?.status === "complete"
+            ? "Reply available."
+            : "");
   useEffect(() => {
     if (announcement && Platform.OS === "ios")
       AccessibilityInfo.announceForAccessibility(announcement);
@@ -184,29 +213,19 @@ function Chat({ aid, fid }: { aid: string; fid: string }) {
       if (!turnId) {
         const sent = finding?.localChat?.outbound?.question ?? draftRef.current;
         await persistDraft(draftRef.current);
+        // Acceptance saves the question and queues its reply job.
         const accepted = await latest.current.acceptChat(aid, fid);
         if (!mounted.current) return;
-        setConversation(accepted.conversation);
+        setConversation((c) => mergeConversation(c, accepted.conversation));
         if (draftRef.current === sent) {
           draftRef.current = "";
           setDraft("");
         }
-        turnId = accepted.turnId;
+        return;
       }
-      setConversation((c) =>
-        c
-          ? {
-              ...c,
-              turns: c.turns.map((t) =>
-                t.id === turnId && t.status !== "complete"
-                  ? { ...t, status: "running", error: null }
-                  : t,
-              ),
-            }
-          : c,
-      );
+      // Explicit Retry/Continue queues a fresh attempt for the same question.
       const result = await latest.current.generateChat(aid, fid, turnId);
-      if (mounted.current) setConversation(result);
+      if (mounted.current) setConversation((c) => mergeConversation(c, result));
     } catch (e) {
       if (mounted.current) {
         setError(message(e));
@@ -301,15 +320,56 @@ function Chat({ aid, fid }: { aid: string; fid: string }) {
                 <Copy kind="eyebrow">YOU</Copy>
                 <Copy testID="chat-user-message">{t.question}</Copy>
               </View>
-              {t.answer && (
+              {t.status === "complete" && t.answer && (
                 <View style={{ padding: 16, gap: 8 }}>
                   <Copy kind="eyebrow">ASSISTANT</Copy>
                   <Copy>{t.answer}</Copy>
                 </View>
               )}
+              {isActive(t) && (
+                <View style={{ padding: 16, gap: 8 }}>
+                  <View style={styles.row}>
+                    <Copy kind="eyebrow">ASSISTANT</Copy>
+                    <ActivityIndicator
+                      size="small"
+                      color={colors.accent}
+                      accessible={false}
+                    />
+                    <Copy kind="small">
+                      {t.status === "queued" ? "Waiting to start…" : "Writing…"}
+                    </Copy>
+                  </View>
+                  {!!t.partial && <Copy>{t.partial}</Copy>}
+                </View>
+              )}
+              {isIncomplete(t) && (
+                <View
+                  style={{
+                    padding: 16,
+                    gap: 8,
+                    borderWidth: 1,
+                    borderStyle: "dashed",
+                    borderColor: colors.line,
+                    borderRadius: tokens.controlRadius,
+                  }}
+                >
+                  <Copy kind="eyebrow" style={{ color: colors.danger }}>
+                    INCOMPLETE RESPONSE
+                  </Copy>
+                  <Copy style={{ color: colors.muted }}>{t.partial}</Copy>
+                </View>
+              )}
               {t.status === "failed" && (
                 <Notice title="Reply could not finish" tone="error">
                   <Copy>{t.error}</Copy>
+                </Notice>
+              )}
+              {t.status === "ready" && (
+                <Notice title="Reply not started">
+                  <Copy>
+                    This saved question has no reply yet. Continue when you’re
+                    ready.
+                  </Copy>
                 </Notice>
               )}
             </View>
@@ -362,7 +422,7 @@ function Chat({ aid, fid }: { aid: string; fid: string }) {
               <Copy kind="small">{conversation.retry_blocked_reason}</Copy>
             )}
           {pending &&
-            pending.status !== "running" &&
+            !isActive(pending) &&
             !conversation?.retry_blocked_reason && (
               <Button
                 label={

@@ -30,6 +30,7 @@ class AssessmentRepository(Protocol):
         ...
 
     def annotation_pending(self) -> list[Assessment]: ...
+    def chat_pending(self) -> list[Assessment]: ...
     def close(self) -> None: ...
 
 
@@ -198,6 +199,17 @@ class FirestoreRepository:
         # One-field collection-group index, provisioned in Terraform.
         query = self.client.collection_group("assessments").where(
             filter=firestore.FieldFilter("annotation_dispatch_pending", "==", True)
+        )
+        return [
+            Assessment.model_validate(s.to_dict())
+            for s in query.stream(timeout=10)
+            if s.reference.path.startswith("users/")
+        ]
+
+    def chat_pending(self):
+        # One-field collection-group index, provisioned in Terraform.
+        query = self.client.collection_group("assessments").where(
+            filter=firestore.FieldFilter("chat_dispatch_pending", "==", True)
         )
         return [
             Assessment.model_validate(s.to_dict())

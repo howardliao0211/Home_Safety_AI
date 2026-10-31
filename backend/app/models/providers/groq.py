@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from app.config import Settings
 from app.errors import ModelError
-from app.models.providers.base import ImageInput, http_model_error
+from app.models.providers.base import ImageInput, http_model_error, sse_events, stream_errors
 
 
 class GroqProvider:
@@ -23,9 +23,8 @@ class GroqProvider:
             transport=httpx.HTTPTransport(retries=0),
         )
 
-    def generate(
-        self, *, system: str, context: dict, images: list[ImageInput], schema: type[BaseModel]
-    ) -> dict:
+    @staticmethod
+    def _content(context, images):
         content = [{"type": "text", "text": json.dumps(context, ensure_ascii=False)}]
         for image in images:
             content.append({"type": "text", "text": image.label})
@@ -36,6 +35,54 @@ class GroqProvider:
                     "image_url": {"url": f"data:{image.content_type};base64,{encoded}"},
                 }
             )
+        return content
+
+    def stream_text(
+        self, *, system: str, context: dict, images: list[ImageInput], max_output_tokens: int
+    ):
+        """Plain chat completion streaming (Structured Outputs cannot stream on Groq)."""
+        body = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": self._content(context, images)},
+            ],
+            "max_completion_tokens": max_output_tokens,
+            "stream": True,
+        }
+        return stream_errors(self._stream(body))
+
+    def _stream(self, body):
+        with self.client.stream("POST", "chat/completions", json=body) as response:
+            if response.is_error:
+                response.read()
+                raise http_model_error(response)
+            for event in sse_events(response):
+                if event is None:  # [DONE] without a finish reason.
+                    break
+                if event.get("error"):
+                    raise ModelError("provider_failed")
+                for choice in event.get("choices") or []:
+                    delta = choice.get("delta") or {}
+                    if delta.get("refusal"):
+                        raise ModelError("refused")
+                    if delta.get("content"):
+                        yield delta["content"]
+                    reason = choice.get("finish_reason")
+                    if reason == "stop":
+                        return
+                    if reason == "length":
+                        raise ModelError("truncated")
+                    if reason:
+                        raise ModelError(
+                            "refused" if reason == "content_filter" else "provider_failed"
+                        )
+        raise ModelError("early_eof")
+
+    def generate(
+        self, *, system: str, context: dict, images: list[ImageInput], schema: type[BaseModel]
+    ) -> dict:
+        content = self._content(context, images)
         try:
             response = self.client.post(
                 "chat/completions",

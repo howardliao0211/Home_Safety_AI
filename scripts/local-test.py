@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start or stop local storage, FastAPI, the highlight worker, and Expo (Linux/WSL).
+"""Start or stop local storage, FastAPI, the chat/highlight worker, and Expo (Linux/WSL).
 
 With --preview, start only Expo using simulated preview data.
 """
@@ -21,7 +21,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 STATE = ROOT / ".tools/local-test"
 PORTS = {"backend": 8000, "frontend": 8081}
-# The worker has no port; it runs saved highlight attempts that local mode never dispatches.
+# The worker has no port; it runs saved chat replies and highlight attempts that
+# local mode never dispatches.
 PROCESSES = ("backend", "worker", "frontend")
 
 
@@ -201,7 +202,7 @@ def start(preview=False):
         )
         started.append("backend")
         wait_ready("backend", backend, "/health")
-        print("Starting highlight worker…", flush=True)
+        print("Starting chat and highlight worker…", flush=True)
         # A worker left behind by a crashed stack would otherwise run twice.
         stop_process("worker")
         worker = launch(
@@ -229,11 +230,10 @@ def start(preview=False):
             file=sys.stderr,
         )
         raise
-    # The worker exits on purpose when MUSE segmentation is not configured.
     if worker.poll() is not None:
         (STATE / "worker.json").unlink(missing_ok=True)
         print(
-            f"Highlight worker is not running; highlights stay queued. "
+            f"Worker is not running; chat replies and highlights stay queued. "
             f"See {STATE / 'worker.log'}"
         )
     print(

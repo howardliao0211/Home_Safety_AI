@@ -229,6 +229,14 @@ concurrency 24 and Cloud Run concurrency 8 with 2 instances admit 12 overlapping
 attempts; cold starts/load may queue work (ADRs 0002/0003). Terraform supplies the
 queue, stable worker URL and service-account identity to the release workflow.
 
+Finding chat replies use the same queue, worker URL and identity
+(`/internal/chat/work`, 240-second dispatch deadline) and the same sweep, which
+re-delivers queued replies and fails expired ones without restarting a stream. A
+running reply holds one Cloud Run request slot for up to 210 seconds, sharing the
+16 slots (concurrency 8, 2 instances) with highlights and app traffic. Apply the
+Terraform plan that adds the `chat_dispatch_pending` collection-group index before
+releasing a revision that queues chat jobs; until then recovery cannot list them.
+
 ## Connect Expo Go
 
 ```bash

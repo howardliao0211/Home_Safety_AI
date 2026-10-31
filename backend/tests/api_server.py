@@ -3,6 +3,10 @@
 This file is excluded from the production Docker build. Never deploy this entrypoint.
 """
 
+import os
+import threading
+import time
+
 import uvicorn
 from pydantic import BaseModel
 
@@ -61,12 +65,6 @@ class IntegrationProvider:
                     },
                 ],
             }
-        if schema.__name__ == "ChatAnswer":
-            if self.fail_chat:
-                self.fail_chat -= 1
-                raise ModelError("timeout")
-            prefix = "Our earlier discussion is included. " if context["previous_chat"] else ""
-            return {"answer": prefix + "Keep the route clear; only you decide its status."}
         if self.fail_revision:
             self.fail_revision -= 1
             raise ModelError("timeout")
@@ -77,11 +75,27 @@ class IntegrationProvider:
             "feedback": "New evidence adds context; you decide whether to resolve this finding.",
         }
 
+    def stream_text(self, *, system, context, images, max_output_tokens):
+        """Delayed deterministic stream, so browsers observe partial text."""
+        prefix = "Our earlier discussion is included. " if context["previous_chat"] else ""
+        words = (prefix + "Keep the route clear; only you decide its status.").split(" ")
+        failing = self.fail_chat > 0
+        if failing:
+            self.fail_chat -= 1
+        for index, word in enumerate(words):
+            time.sleep(self.chat_delay)
+            yield word + ("" if index == len(words) - 1 else " ")
+            if failing and index == 3:
+                raise ModelError("transport")
+
     def close(self):
         pass
 
 
+# Overridable so the suite can run beside another Expo server on the default port.
+FRONTEND_PORT = int(os.environ.get("API_TEST_FRONTEND_PORT", "8082"))
 provider = IntegrationProvider()
+provider.chat_delay = 0.25
 settings = Settings(
     _env_file=None,
     environment="local",
@@ -92,7 +106,7 @@ settings = Settings(
     firestore_emulator_host="127.0.0.1:8080",
     storage_emulator_host="http://127.0.0.1:4443",
     firebase_auth_emulator_host="127.0.0.1:9099",
-    cors_origins=["http://127.0.0.1:8082", "http://localhost:8082"],
+    cors_origins=[f"http://{host}:{FRONTEND_PORT}" for host in ("127.0.0.1", "localhost")],
 )
 app = create_app(settings, provider=provider)
 
@@ -119,8 +133,24 @@ def control(configuration: dict):
     provider.fail_initial = int(configuration.get("fail_initial", 0))
     provider.fail_revision = int(configuration.get("fail_revision", 0))
     provider.fail_chat = int(configuration.get("fail_chat", 0))
+    provider.chat_delay = float(configuration.get("chat_delay", 0.25))
     return {"configured": True}
 
 
+def chat_worker():
+    """Test-only stand-in for the independent worker: deliver queued chat jobs."""
+    while True:
+        chat = getattr(app.state, "chat", None)
+        if chat:
+            try:
+                chat.recover()
+                for item in chat.pending():
+                    threading.Thread(target=chat.work, args=item, daemon=True).start()
+            except Exception:
+                pass
+        time.sleep(0.25)
+
+
 if __name__ == "__main__":
+    threading.Thread(target=chat_worker, daemon=True).start()
     uvicorn.run(app, host="127.0.0.1", port=8001)

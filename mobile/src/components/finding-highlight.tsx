@@ -229,6 +229,9 @@ export function FindingHighlight({
                   uri: mask,
                   width: current.width || undefined,
                   height: current.height || undefined,
+                  label: apiEnabled
+                    ? "AI-generated highlight"
+                    : "Simulated highlight",
                 },
               ]
             : []

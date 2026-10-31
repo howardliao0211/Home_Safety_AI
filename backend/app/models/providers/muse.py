@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from app.config import Settings
 from app.errors import ModelError
-from app.models.providers.base import ImageInput, http_model_error
+from app.models.providers.base import ImageInput, http_model_error, sse_events, stream_errors
 
 
 class MuseProvider:
@@ -23,9 +23,8 @@ class MuseProvider:
             transport=httpx.HTTPTransport(retries=0),
         )
 
-    def generate(
-        self, *, system: str, context: dict, images: list[ImageInput], schema: type[BaseModel]
-    ) -> dict:
+    @staticmethod
+    def _content(context, images):
         content = [{"type": "input_text", "text": json.dumps(context, ensure_ascii=False)}]
         for image in images:
             content.append({"type": "input_text", "text": image.label})
@@ -33,6 +32,48 @@ class MuseProvider:
             content.append(
                 {"type": "input_image", "image_url": f"data:{image.content_type};base64,{encoded}"}
             )
+        return content
+
+    def stream_text(
+        self, *, system: str, context: dict, images: list[ImageInput], max_output_tokens: int
+    ):
+        """Responses streaming: answer deltas, then response.completed or a failure event."""
+        body = {
+            "model": self.model,
+            "instructions": system,
+            "input": [{"role": "user", "content": self._content(context, images)}],
+            "max_output_tokens": max_output_tokens,
+            "stream": True,
+            "store": False,
+        }
+        return stream_errors(self._stream(body))
+
+    def _stream(self, body):
+        with self.client.stream("POST", "responses", json=body) as response:
+            if response.is_error:
+                response.read()
+                raise http_model_error(response)
+            for event in sse_events(response):
+                kind = event.get("type") if event else None
+                if kind == "response.output_text.delta":
+                    if event.get("delta"):
+                        yield event["delta"]
+                elif kind and kind.startswith("response.refusal"):
+                    raise ModelError("refused")
+                elif kind == "response.completed":
+                    if (event.get("response") or {}).get("status", "completed") != "completed":
+                        raise ModelError("truncated")
+                    return
+                elif kind == "response.incomplete":
+                    raise ModelError("truncated")
+                elif kind in {"response.failed", "error"}:
+                    raise ModelError("provider_failed")
+        raise ModelError("early_eof")
+
+    def generate(
+        self, *, system: str, context: dict, images: list[ImageInput], schema: type[BaseModel]
+    ) -> dict:
+        content = self._content(context, images)
         try:
             response = self.client.post(
                 "responses",

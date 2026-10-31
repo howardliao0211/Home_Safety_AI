@@ -303,25 +303,56 @@ Authenticated endpoints, scoped to `/v1/assessments/{aid}/findings/{fid}/chat`:
 
 | Method/path | Behavior |
 | --- | --- |
-| `GET` | Saved ordered turns and pending/failed state; no generation |
-| `POST /turns` | JSON `{id: UUID, question: string}`; persists before generation |
-| `POST /turns/{tid}/generate` | JSON `{attempt_id: UUID}`; one explicit generation/retry |
+| `GET` | Pure read: saved turns with status, partial text and version; never generates |
+| `POST /turns` | JSON `{id: UUID, question: string}`; saves the question and a queued reply job |
+| `POST /turns/{tid}/generate` | JSON `{attempt_id: UUID}`; explicit Retry/Continue queues a fresh attempt |
 
-Repeat the same turn ID/question to reconcile a lost acceptance response. Different
-input with that ID conflicts. Each explicit manual retry uses a fresh attempt ID;
-replaying an attempt ID returns saved state without another model call. Only one
-unfinished turn per finding is accepted across devices. `ready` has not started;
-`running` expires after 300 seconds into an interrupted failure on read. Reopening
-or polling never starts generation. An answer is saved before completion is returned.
-Clients read history again after ambiguous responses, then offer manual Continue or
-Retry. No provider fallback or automatic model retry occurs.
+### Finding chat jobs
 
-Chat is embedded as bounded per-finding operation records in the existing atomic
-Firestore assessment document. It is omitted from normal assessment DTOs and exposed
-only on the chat API. Transactions fence the active owner and deletion state, retain
-concurrent status/highlight changes, and never recreate missing records. Assessment
-and account deletion therefore cover all chat records using their existing retryable
-flows. No additional collection, index, retention policy or migration is required.
+Replies are durable jobs, `queued → running → complete | failed`, independent of
+the app. Acceptance atomically saves the question, a queued attempt (server attempt
+ID) and dispatch intent (`chat_dispatch_pending`), then returns without waiting for
+the model. A Cloud Tasks delivery (`POST /internal/chat/work`, service OIDC, the
+same queue as highlights) claims the attempt once with an execution ID and lease;
+duplicate or late deliveries are no-ops. The worker assembles saved context and
+the original photo, streams plain answer text from the provider and persists the
+accumulated `partial` at most every 0.75 seconds (first fragment immediately),
+incrementing `version` on every change. Completion requires the provider's
+explicit success event, nonblank text and at most 3,000 characters.
+
+Deadlines, coordinated with Cloud Run's 300-second request limit:
+
+| Bound | Value |
+| --- | --- |
+| Queue: unstarted attempt fails as `not_started` | 600 s |
+| Provider stream budget per attempt | 180 s (plus `MODEL_TIMEOUT_SECONDS` between chunks) |
+| Execution lease: a running attempt then fails as `interrupted` | 210 s |
+| Cloud Tasks dispatch deadline | 240 s |
+
+The once-per-minute recovery sweep (`/internal/annotations/recover`) and the
+local worker re-deliver queued attempts and persist expired ones as failures. A
+started stream is never restarted: only an explicit Retry queues a fresh attempt,
+which clears the previous partial and replaces it with one new answer. Failed
+attempts keep their partial text and a safe `error_code` (`interrupted`,
+`not_started`, `transport`, `timeout`, `refused`, `truncated`, `early_eof`,
+`provider_failed`, `too_long`, `invalid_response`, `context_limit`); the app labels
+that text **Incomplete response**. Only completed replies enter later model context.
+Clients ignore snapshots whose `version` is older than one they hold. Legacy
+`ready` turns (accepted before jobs) are readable and continue only explicitly.
+
+Repeat the same turn ID/question to reconcile a lost acceptance response; different
+input with that ID conflicts. Replaying a retry `attempt_id`, or retrying while a job
+is queued/running, returns saved state. Only one unfinished turn per finding is
+accepted across devices. No provider fallback or automatic model retry occurs.
+
+Chat is embedded as bounded per-finding records in the existing atomic Firestore
+assessment document; partial writes use the same transactional read-modify-write,
+so concurrent status, sibling chat and highlight changes are preserved. Every
+publication is fenced by execution ID, lease, deletion state and the active
+account, so late writes cannot resurrect deleted data. Assessment and account
+deletion cover all chat records through their existing retryable flows; deletion
+also clears dispatch intent. A one-field collection-group index on
+`chat_dispatch_pending` (Terraform) serves recovery.
 
 Limits (enforced before acceptance and rechecked before generation):
 
@@ -331,8 +362,8 @@ Limits (enforced before acceptance and rechecked before generation):
   headroom for a question, reply and metadata. No new chat is accepted once the
   assessment reaches 650,000 bytes. The existing 750,000-byte guard also reserves
   24,000 bytes for every unfinished reply, protecting concurrent writes.
-- Context: at most 24,000 UTF-8 bytes for complete JSON context, safety instructions
-  and output schema. Earlier chat and completed historical text are never truncated
+- Context: at most 24,000 UTF-8 bytes for complete JSON context and safety
+  instructions. Earlier chat and completed historical text are never truncated
   or summarised. Only the original room photo is resent, through private photo access.
 - Model budget: `CHAT_CONTEXT_TOKENS` defaults to 65,536; set it to no more than the
   selected model's documented context window. `CHAT_IMAGE_TOKEN_RESERVE` defaults
@@ -344,8 +375,14 @@ Limits (enforced before acceptance and rechecked before generation):
   sending while preserving history. The provider/model must support the chosen
   image reserve and a 6,000-token output allocation.
 
-Both Muse and Groq use the shared adapter boundary, strict `{answer}` output and
-application-owned history. [Groq Scout's documented window](https://console.groq.com/docs/model/meta-llama/llama-4-scout-17b-16e-instruct)
+Both Muse and Groq stream plain answer text through the shared adapter boundary
+(`stream_text`) with application-owned history; Muse keeps `store: false`. Initial
+assessments keep strict structured output (Groq cannot stream Structured Outputs).
+The 6,000-token request allocation also covers Muse reasoning tokens, which count
+toward `max_output_tokens`. Live checks (2026-11-01, sample living-room photo):
+Groq `qwen/qwen3.8-27b` streamed 27 fragments; Muse `muse-spark-1.3` streamed 7
+fragments after about 6 seconds of reasoning (a 700-token budget was exhausted by
+reasoning before any text, hence 6,000). [Groq Scout's documented window](https://console.groq.com/docs/model/meta-llama/llama-4-scout-17b-16e-instruct)
 is 128K. Muse capacity depends on the configured `MUSE_MAIN_MODEL`; the existing
 sample does not establish a universal window, so confirm the deployment's model
 allowance before increasing defaults. Recognised provider capacity errors permanently

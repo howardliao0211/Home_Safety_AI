@@ -88,6 +88,9 @@ class MemoryRepository:
     def annotation_pending(self):
         return [copy.deepcopy(a) for a in self.records.values() if a.annotation_dispatch_pending]
 
+    def chat_pending(self):
+        return [copy.deepcopy(a) for a in self.records.values() if a.chat_dispatch_pending]
+
     def close(self):
         pass
 
@@ -174,8 +177,39 @@ class StubProvider:
             raise result
         return copy.deepcopy(result)
 
+    def stream_text(self, **kwargs):
+        """Chat streaming: a queued {"answer"} is split into fragments; a Script
+        controls fragments, pauses and a failure after partial output."""
+        self.calls.append(kwargs)
+        if self.on_call:
+            self.on_call()
+        result = self.results.popleft() if self.results else {"answer": "A short reply."}
+        if isinstance(result, Exception):
+            raise result
+        if isinstance(result, dict):
+            answer = result["answer"]
+            half = len(answer) // 2
+            result = Script([answer[:half], answer[half:]])
+        return result.run()
+
     def close(self):
         pass
+
+
+class Script:
+    """Deterministic provider stream: fragments, optional gates, optional error."""
+
+    def __init__(self, fragments, error=None, gates=None):
+        self.fragments, self.error, self.gates = fragments, error, gates or {}
+
+    def run(self):
+        for index, fragment in enumerate(self.fragments):
+            gate = self.gates.get(index)
+            if gate:
+                gate()
+            yield fragment
+        if self.error:
+            raise self.error
 
 
 @pytest.fixture

@@ -7,8 +7,11 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from app.accounts import AccountDeletion
 from app.annotations.provider import MuseHighlightProvider
 from app.annotations.service import AnnotationService
+from app.assessments.chat import ChatService
+from app.assessments.service import AssessmentService
 from app.auth import FirebaseIdentity
 from app.config import Settings
+from app.models.providers.factory import build_provider
 from app.storage.photos import GCSPhotoStore
 from app.storage.repository import FirestoreRepository
 
@@ -19,19 +22,25 @@ CONCURRENCY = 12
 class LocalWorker:
     """Claims each pending attempt independently, mirroring Cloud Tasks deliveries."""
 
-    def __init__(self, service, concurrency=CONCURRENCY):
+    def __init__(self, service, concurrency=CONCURRENCY, chat=None):
         self.service = service
+        self.chat = chat
         self.executor = ThreadPoolExecutor(concurrency, thread_name_prefix="highlight")
         self.lock = threading.Lock()
         self.running = {}
 
     def tick(self):
         self.service.reap_assets()
-        for item in self.service.pending():
+        jobs = [(self.service.work, item) for item in self.service.pending()]
+        if self.chat:
+            # Same claims as Cloud Tasks deliveries: expiry, then queued attempts.
+            self.chat.recover()
+            jobs += [(self.chat.work, item) for item in self.chat.pending()]
+        for work, item in jobs:
             with self.lock:
                 if item in self.running:
                     continue
-                future = self.executor.submit(self.service.work, *item)
+                future = self.executor.submit(work, *item)
                 self.running[item] = future
             future.add_done_callback(lambda _, item=item: self._finished(item))
 
@@ -61,7 +70,9 @@ def main():
         if settings.model_provider == "muse" and settings.muse_segmentation_model.strip()
         else None
     )
-    worker = LocalWorker(AnnotationService(records, photos, provider))
+    model = build_provider(settings)
+    chat = ChatService(AssessmentService(records, photos, model))
+    worker = LocalWorker(AnnotationService(records, photos, provider), chat=chat)
     try:
         while True:
             accounts.recover()
@@ -71,6 +82,7 @@ def main():
         pass
     finally:
         worker.close()
+        model.close()
         identity.close()
         records.close()
         photos.close()

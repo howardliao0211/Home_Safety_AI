@@ -162,7 +162,7 @@ test("connected lifecycle: upload, retained failures, retry, cache-free restore,
   await page
     .getByRole("button", { name: "Chat about it", exact: true })
     .click();
-  // The server accepts the turn, but the first response is lost in transport.
+  // The server accepts and queues the turn, but the response is lost in transport.
   await page.route("**/chat/turns", async (route) => {
     await route.fetch();
     await route.abort("failed");
@@ -172,23 +172,26 @@ test("connected lifecycle: upload, retained failures, retry, cache-free restore,
     .getByRole("textbox", { name: "Your question", exact: true })
     .fill("How does this affect night use?");
   await page.getByRole("button", { name: "Send", exact: true }).click();
+  // The durable job still runs; its partial text arrives before it fails.
+  await expect(page.getByText("Writing…", { exact: true })).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Continue reply", exact: true }),
+    page
+      .getByText(/^Keep the route/)
+      .locator("visible=true")
+      .first(),
+  ).toBeVisible();
+  await expect(
+    page.getByText("INCOMPLETE RESPONSE", { exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("textbox", { name: "Your question", exact: true }),
   ).toHaveValue("");
-  await page
-    .getByRole("button", { name: "Continue reply", exact: true })
-    .click();
-  await expect(
-    page.getByRole("button", { name: "Retry reply", exact: true }),
-  ).toBeVisible();
   await page.reload();
   await expect(
-    page.getByRole("textbox", { name: "Your question", exact: true }),
-  ).toHaveValue("");
-  // Completion is persisted even if the success response is lost.
+    page.getByText("INCOMPLETE RESPONSE", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByTestId("chat-user-message")).toHaveCount(1);
+  // The retry is queued even if its response is lost, then replaces the partial.
   await page.route("**/chat/turns/*/generate", async (route) => {
     await route.fetch();
     await route.abort("failed");
@@ -200,6 +203,9 @@ test("connected lifecycle: upload, retained failures, retry, cache-free restore,
       exact: true,
     }),
   ).toBeVisible();
+  await expect(
+    page.getByText("INCOMPLETE RESPONSE", { exact: true }),
+  ).toHaveCount(0);
   await page
     .getByRole("textbox", { name: "Your question", exact: true })
     .fill("Does that also apply during the day?");
@@ -427,8 +433,9 @@ test("eager finding highlights are only fetched, align inline, hide and report i
       attempt: posts + 1,
       photo_id: saved.photo.id,
       photo_kind: "original",
+      // Real attempts carry the stored photo's size; mismatches are not drawn.
       width: 1200,
-      height: 800,
+      height: 900,
       orientation: 1,
       retryable: true,
     };

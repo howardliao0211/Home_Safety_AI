@@ -192,15 +192,28 @@ class FeedbackRequest(StrictModel):
     kind: Literal["wrong_object"]
 
 
+# "ready" is a legacy accepted-but-unstarted turn; new turns start "queued".
+ChatStatus = Literal["ready", "queued", "running", "failed", "complete"]
+
+
 class ChatTurn(StrictModel):
     id: str
     question: str = Field(min_length=1, max_length=2000)
     answer: str | None = None
-    status: OperationStatus = "ready"
+    status: ChatStatus = "ready"
     error: str | None = None
+    # Safe failure category, e.g. interrupted, provider_failed, truncated, context_limit.
+    error_code: str | None = None
     created_at: datetime = Field(default_factory=now)
     finished_at: datetime | None = None
     attempt_ids: list[str] = Field(default_factory=list)
+    # Bounded text published so far by the current attempt; kept (as an incomplete
+    # response) when it fails, cleared by an explicit retry, never sent to the model.
+    partial: str = ""
+    # Monotonic progress version: clients ignore snapshots older than one they hold.
+    version: int = 0
+    queued_until: datetime | None = None
+    started_at: datetime | None = None
     expires_at: datetime | None = None
     execution: str | None = None
 
@@ -250,6 +263,8 @@ class Assessment(Operation):
     lease: Lease | None = None
     annotations: list[Annotation] = Field(default_factory=list)
     annotation_dispatch_pending: bool = False
+    # Recovery index: some chat turn is queued or running.
+    chat_dispatch_pending: bool = False
     annotation_commits: dict[str, datetime] = Field(default_factory=dict)
 
     @model_validator(mode="after")

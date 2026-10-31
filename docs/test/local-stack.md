@@ -24,13 +24,13 @@ for this session, overriding `EXPO_PUBLIC_DATA_SOURCE` and
 from root `.env` or an explicit process override. Keep it aligned with the backend token
 when configured. Provider credentials stay in the backend configuration.
 
-The script also starts the highlight worker
-(`python -m app.annotations.local_worker`). Locally there is no Cloud Tasks
-queue, so this worker is what runs saved finding highlight attempts; without it
-highlights stay queued. The worker exits when MUSE segmentation is not
-configured. `start` then reports that it is not running and continues. Unlike
-the API, the worker does not reload on code changes; run `stop` and `start`
-after changing highlight code.
+The script also starts the worker (`python -m app.annotations.local_worker`).
+Locally there is no Cloud Tasks queue, so this worker runs queued finding chat
+replies and saved highlight attempts; without it, replies and highlights stay
+queued. Highlights additionally need MUSE segmentation configured. If the worker
+stops, `start` reports that it is not running and continues. Unlike the API, the
+worker does not reload on code changes; run `stop` and `start` after changing
+chat or highlight code.
 
 ## Preview mode
 

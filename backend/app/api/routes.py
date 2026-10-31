@@ -55,6 +55,7 @@ def public(assessment: Assessment) -> dict:
             "owner_uid",
             "annotations",
             "annotation_dispatch_pending",
+            "chat_dispatch_pending",
             "annotation_commits",
         },
     )
@@ -286,16 +287,25 @@ def deletion_status(request: Request, x_deletion_receipt: Annotated[str, Header(
 CHAT = "/v1/assessments/{assessment_id}/findings/{finding_id}/chat"
 
 
+def chat_service(request: Request) -> ChatService:
+    return request.app.state.chat
+
+
+Chat = Annotated[ChatService, Depends(chat_service)]
+
+
 @router.get(CHAT)
-def get_chat(assessment_id: UUID, finding_id: UUID, svc: Service, device: Owner):
-    return ChatService(svc).get(device, str(assessment_id), str(finding_id))
+def get_chat(assessment_id: UUID, finding_id: UUID, chat: Chat, device: Owner):
+    """Read saved turns, including queued/running progress and partial text."""
+    return chat.get(device, str(assessment_id), str(finding_id))
 
 
 @router.post(CHAT + "/turns", status_code=201)
 def accept_chat(
-    assessment_id: UUID, finding_id: UUID, body: ChatRequest, svc: Service, device: Owner
+    assessment_id: UUID, finding_id: UUID, body: ChatRequest, chat: Chat, device: Owner
 ):
-    return ChatService(svc).accept(device, str(assessment_id), str(finding_id), body)
+    """Save the question and queue its reply job; returns before any model output."""
+    return chat.accept(device, str(assessment_id), str(finding_id), body)
 
 
 @router.post(CHAT + "/turns/{turn_id}/generate")
@@ -304,15 +314,8 @@ def generate_chat(
     finding_id: UUID,
     turn_id: UUID,
     body: ChatGeneration,
-    request: Request,
-    svc: Service,
+    chat: Chat,
     device: Owner,
 ):
-    return ChatService(svc).generate(
-        device,
-        str(assessment_id),
-        str(finding_id),
-        str(turn_id),
-        body.attempt_id,
-        request.state.request_id,
-    )
+    """Explicit Retry/Continue: queue a fresh attempt for the saved question."""
+    return chat.retry(device, str(assessment_id), str(finding_id), str(turn_id), body.attempt_id)

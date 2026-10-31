@@ -452,6 +452,7 @@ class AssessmentService:
             idle(previous)
             previous.deleting = True
             previous.annotation_dispatch_pending = False
+            previous.chat_dispatch_pending = False
             for annotation in previous.annotations:
                 if annotation.state in {"queued", "processing"}:
                     annotation.state = "failed"

@@ -128,6 +128,9 @@ export function ChecklistPhoto({ assessment }: { assessment: Assessment }) {
             uri: loaded[m.annotationId]!,
             width: m.width,
             height: m.height,
+            label: `${apiEnabled ? "AI-generated" : "Simulated"} highlight: ${
+              assessment.findings.find((f) => f.id === m.findingId)?.title
+            } (${m.severity})`,
           },
         ]
       : [],

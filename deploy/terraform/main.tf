@@ -182,6 +182,20 @@ resource "google_firestore_field" "annotation_dispatch" {
   }
 }
 
+# Chat reply recovery: the sweep finds assessments with queued/running replies.
+resource "google_firestore_field" "chat_dispatch" {
+  project    = var.project_id
+  database   = google_firestore_database.assessments.name
+  collection = "assessments"
+  field      = "chat_dispatch_pending"
+  index_config {
+    indexes {
+      order       = "ASCENDING"
+      query_scope = "COLLECTION_GROUP"
+    }
+  }
+}
+
 # Identity Platform config survives destroy in GCP. Guided start verifies an
 # existing test account before provisioning, so adopt its config on every fresh
 # state. Manual first-time provisioning keeps the default (create instead). The

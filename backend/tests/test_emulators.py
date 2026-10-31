@@ -145,7 +145,11 @@ def test_real_model_photo_assessment_and_review(monkeypatch):
             client.delete(path)
 
 
-def test_finding_chat_persists_across_clients_and_deletes_with_assessment(photo_bytes, monkeypatch):
+def test_finding_chat_jobs_survive_restart_stream_partials_and_delete(photo_bytes, monkeypatch):
+    import threading
+
+    from conftest import Script
+
     monkeypatch.setenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")
     config = Settings(
         _env_file=None,
@@ -155,47 +159,71 @@ def test_finding_chat_persists_across_clients_and_deletes_with_assessment(photo_
         storage_emulator_host="http://127.0.0.1:4443",
     )
     uid, aid, tid = new_id(), new_id(), new_id()
-    provider = StubProvider()
     base = f"/v1/assessments/{aid}"
-    with TestClient(create_app(config, provider=provider)) as client:
+    with TestClient(create_app(config, provider=StubProvider())) as client:
         client.headers["Authorization"] = "Bearer " + uid
         try:
-            assert (
-                client.post(
-                    "/v1/assessments",
-                    data={"assessment_id": aid},
-                    files={"photo": ("room.png", photo_bytes)},
-                ).status_code
-                == 201
+            created = client.post(
+                "/v1/assessments",
+                data={"assessment_id": aid},
+                files={"photo": ("room.png", photo_bytes)},
             )
-            result = client.post(base + "/analyze").json()
-            fid = result["findings"][0]["id"]
+            assert created.status_code == 201
+            fid = client.post(base + "/analyze").json()["findings"][0]["id"]
             path = base + f"/findings/{fid}/chat"
             question = {"id": tid, "question": "What can I do about the cable?"}
             accepted = client.post(path + "/turns", json=question)
             assert accepted.status_code == 201, accepted.text
-            # Independent Firestore SDK client sees the accepted question before generation.
-            repo = FirestoreRepository(config)
-            try:
-                saved = repo.get(uid, aid)
-                assert saved.findings[0].chat[0].question == question["question"]
-                assert saved.findings[0].chat[0].status == "ready"
-            finally:
-                repo.close()
-            provider.results.append(
-                {"answer": "Keep the route clear if safe. The photo cannot establish safety."}
-            )
-            generated = client.post(path + f"/turns/{tid}/generate", json={"attempt_id": new_id()})
-            assert generated.status_code == 200, generated.text
-            with TestClient(create_app(config, provider=StubProvider())) as another_installation:
-                another_installation.headers["Authorization"] = "Bearer " + uid
-                assert another_installation.get(path).json() == generated.json()
-            assert client.delete(base).status_code == 204
-            assert client.get(path).status_code == 404
+            assert accepted.json()["turns"][0]["status"] == "queued"
+        except Exception:
+            client.delete(base)
+            raise
+    # A separate worker process (fresh app and SDK clients) finds the saved job
+    # through the Firestore recovery index and streams it.
+    worker_provider = StubProvider()
+    first_out, release = threading.Event(), threading.Event()
+
+    def pause():
+        first_out.set()
+        assert release.wait(10)
+
+    worker_provider.results.append(Script(["Keep the route ", "clear if safe."], gates={1: pause}))
+    with (
+        TestClient(create_app(config, provider=worker_provider)) as worker,
+        TestClient(create_app(config, provider=StubProvider())) as installation,
+    ):
+        installation.headers["Authorization"] = "Bearer " + uid
+        try:
+            chat = worker.app.state.chat
+            items = [item for item in chat.pending() if item[1] == aid]
+            assert len(items) == 1
+            thread = threading.Thread(target=chat.work, args=items[0])
+            thread.start()
+            assert first_out.wait(10)
+            during = installation.get(path).json()["turns"][0]
+            assert during["status"] == "running" and during["partial"] == "Keep the route "
+            release.set()
+            thread.join(10)
+            done = installation.get(path).json()["turns"][0]
+            assert done["status"] == "complete"
+            assert done["answer"] == "Keep the route clear if safe."
+            chat.work(*items[0])  # Redelivery after restart never re-runs the model.
+            assert len(worker_provider.calls) == 1
+            # A job running when the assessment is deleted cannot resurrect it.
+            second = {"id": new_id(), "question": "And at night?"}
+            assert installation.post(path + "/turns", json=second).status_code == 201
+            (item,) = [i for i in chat.pending() if i[1] == aid]
+
+            def delete():
+                assert installation.delete(base).status_code == 204
+
+            worker_provider.results.append(Script(["Late ", "write."], gates={1: delete}))
+            chat.work(*item)
+            assert installation.get(path).status_code == 404
             repo = FirestoreRepository(config)
             try:
                 assert repo.get(uid, aid) is None
             finally:
                 repo.close()
         finally:
-            client.delete(base)
+            installation.delete(base)

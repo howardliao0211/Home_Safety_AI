@@ -11,6 +11,7 @@ from app.annotations.provider import MuseHighlightProvider
 from app.annotations.service import AnnotationService
 from app.api.cors import ConfiguredCORS
 from app.api.routes import router
+from app.assessments.chat import ChatService
 from app.assessments.service import AssessmentService
 from app.auth import FirebaseIdentity
 from app.config import Settings
@@ -75,6 +76,7 @@ def create_app(
             )
             app.state.annotations = AnnotationService(records, images, highlighting, dispatch)
             app.state.service = AssessmentService(records, images, model, app.state.annotations)
+            app.state.chat = ChatService(app.state.service, dispatch)
             yield
 
     app = FastAPI(title="Home Safety AI", version="0.1.0", lifespan=lifespan)

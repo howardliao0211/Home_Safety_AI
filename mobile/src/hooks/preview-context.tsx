@@ -9,6 +9,7 @@ import {
 import {
   emptyConversation,
   validateQuestion,
+  type ChatTurn,
   type Conversation,
 } from "@/domain/chat";
 import { fixtureSuggestions, previewService } from "@/api/preview-service";
@@ -292,6 +293,107 @@ function usePreviewState(session: Session) {
       findings: a.findings.map((f) => (f.id === findingId ? change(f) : f)),
     }));
 
+  /** Simulated durable reply: one saved turn per change, with a growing version. */
+  async function savePreviewTurn(
+    aid: string,
+    fid: string,
+    tid: string,
+    change: (turn: ChatTurn) => ChatTurn | null,
+  ) {
+    let result: Conversation | undefined;
+    await editFinding(aid, fid, (f) => {
+      const before = f.localChat?.preview ?? emptyConversation();
+      const turns = before.turns.map((t) => {
+        if (t.id !== tid) return t;
+        const next = change(t);
+        return next ? { ...next, version: (t.version ?? 0) + 1 } : t;
+      });
+      result = {
+        ...before,
+        turns,
+        blocked_reason:
+          turns.length >= 12
+            ? "This finding has reached its 12-question limit. Your saved discussion remains available."
+            : null,
+      };
+      return {
+        ...f,
+        localChat: {
+          ...f.localChat,
+          draft: f.localChat?.draft ?? "",
+          preview: result,
+        },
+      };
+    });
+    return result;
+  }
+  const previewJobs = useRef(new Set<string>());
+  async function runPreviewReply(aid: string, fid: string, tid: string) {
+    const key = `${aid}:${fid}:${tid}`;
+    if (previewJobs.current.has(key)) return;
+    previewJobs.current.add(key);
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    try {
+      await wait(700);
+      const a = assessmentById(aid);
+      const f = a.findings.find((f) => f.id === fid)!;
+      const history = f.localChat?.preview?.turns ?? [];
+      const turn = history.find((t) => t.id === tid);
+      if (!turn || turn.status !== "queued" || !sessionActive.current) return;
+      const fails = a.scenario === "update-error" && (turn.attempts ?? 1) === 1;
+      const earlier = history.some(
+        (t) => t.id !== tid && t.status === "complete",
+      );
+      const words =
+        `Simulated guidance about “${f.title}”: ${f.recommendation} ${earlier ? "As in our earlier discussion, " : ""}${f.uncertainty} You decide whether to change this finding’s status.`.split(
+          " ",
+        );
+      let text = "";
+      let running = true;
+      await savePreviewTurn(aid, fid, tid, (t) =>
+        t.status === "queued"
+          ? { ...t, status: "running" }
+          : ((running = false), null),
+      );
+      for (let i = 0; running && i < words.length; i++) {
+        await wait(100);
+        if (!sessionActive.current) return;
+        text += (i ? " " : "") + words[i];
+        const failing = fails && i === 5;
+        await savePreviewTurn(aid, fid, tid, (t) =>
+          t.status !== "running"
+            ? ((running = false), null)
+            : failing
+              ? {
+                  ...t,
+                  status: "failed",
+                  partial: text,
+                  error:
+                    "The simulated reply was interrupted. Retry when ready.",
+                  error_code: "simulated",
+                }
+              : { ...t, partial: text },
+        );
+        if (failing) return;
+      }
+      if (!running) return;
+      await savePreviewTurn(aid, fid, tid, (t) =>
+        t.status === "running"
+          ? {
+              ...t,
+              status: "complete",
+              answer: text,
+              partial: "",
+              finished_at: new Date().toISOString(),
+            }
+          : null,
+      );
+    } catch {
+      /* Saved state stays readable; restart recovery marks it interrupted. */
+    } finally {
+      previewJobs.current.delete(key);
+    }
+  }
   return {
     apiMode: apiEnabled,
     loadRemotePhoto: async (photo: NonNullable<Photo["remote"]>) =>
@@ -736,10 +838,13 @@ function usePreviewState(session: Session) {
                 id: outbound.id,
                 question: outbound.question,
                 answer: null,
-                status: "ready",
+                status: "queued",
                 error: null,
                 created_at: new Date().toISOString(),
                 finished_at: null,
+                partial: "",
+                version: 1,
+                attempts: 1,
               },
             ],
           };
@@ -757,8 +862,10 @@ function usePreviewState(session: Session) {
           ...(!apiEnabled ? { preview: conversation } : {}),
         },
       }));
+      if (!apiEnabled) void runPreviewReply(aid, fid, outbound.id);
       return { conversation, turnId: outbound.id };
     },
+    /** Explicit Retry/Continue: queues a fresh attempt; never waits for the reply. */
     generateChat: async (
       aid: string,
       fid: string,
@@ -766,58 +873,22 @@ function usePreviewState(session: Session) {
     ): Promise<Conversation> => {
       if (apiEnabled)
         return (await backend()).generateChat(aid, fid, tid, newApiId());
-      const a = assessmentById(aid);
-      const f = a.findings.find((f) => f.id === fid)!;
+      const f = assessmentById(aid).findings.find((f) => f.id === fid)!;
       const before = f.localChat?.preview ?? emptyConversation();
       const turn = before.turns.find((t) => t.id === tid);
       if (!turn) throw new Error("This saved question is no longer available.");
-      if (turn.status === "complete" || turn.status === "running")
-        return before;
-      const isRetry = turn.status === "failed";
-      const save = async (conversation: Conversation) => {
-        await editFinding(aid, fid, (f) => ({
-          ...f,
-          localChat: {
-            ...f.localChat,
-            draft: f.localChat?.draft ?? "",
-            preview: conversation,
-          },
-        }));
-        return conversation;
-      };
-      await save({
-        ...before,
-        turns: before.turns.map((t) =>
-          t.id === tid ? { ...t, status: "running", error: null } : t,
-        ),
-      });
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-      if (!sessionActive.current)
-        throw new Error("The account session has changed.");
-      const failed = a.scenario === "update-error" && !isRetry;
-      const conversation: Conversation = {
-        ...before,
-        turns: before.turns.map((t) =>
-          t.id !== tid
-            ? t
-            : {
-                ...t,
-                status: failed ? "failed" : "complete",
-                error: failed
-                  ? "The simulated reply could not finish. Retry when ready."
-                  : null,
-                answer: failed
-                  ? null
-                  : `Simulated guidance about “${f.title}”: ${f.recommendation} ${before.turns.some((t) => t.status === "complete") ? "As in our earlier discussion, " : ""}${f.uncertainty} You decide whether to change this finding’s status.`,
-                finished_at: failed ? null : new Date().toISOString(),
-              },
-        ),
-        blocked_reason:
-          before.turns.length >= 12
-            ? "This finding has reached its 12-question limit. Your saved discussion remains available."
-            : null,
-      };
-      return save(conversation);
+      if (turn.status !== "failed" && turn.status !== "ready") return before;
+      const conversation = await savePreviewTurn(aid, fid, tid, (t) => ({
+        ...t,
+        status: "queued",
+        error: null,
+        error_code: null,
+        partial: "",
+        answer: null,
+        attempts: (t.attempts ?? 0) + 1,
+      }));
+      void runPreviewReply(aid, fid, tid);
+      return conversation ?? before;
     },
     annotationClient: backend,
     /** Server masks arrive tinted by severity; preview draws simulated ones. */

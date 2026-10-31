@@ -31,8 +31,12 @@ def test_stored_orange_masks_are_tinted_by_severity_with_geometry_preserved(seve
     assert inside[:3] == COLORS[severity] and 0 < inside[3] < 255
     assert after.getpixel((95, 2))[3] == 0  # Outside stays transparent.
     # The darker rim keeps the outline distinguishable from the fill.
-    rims = {after.getpixel((x, y))[:3] for x in range(100) for y in range(60)
-            if after.getpixel((x, y))[3] == 255}
+    rims = {
+        after.getpixel((x, y))[:3]
+        for x in range(100)
+        for y in range(60)
+        if after.getpixel((x, y))[3] == 255
+    }
     assert COLORS[severity] in rims and len(rims) == 2
 
 
@@ -40,11 +44,11 @@ def test_served_masks_use_the_findings_severity_without_new_segmentation(rig, cr
     client, *_ = rig
     svc, provider = enabled(rig)
     result = findings("tall cabinet", "power cable", "small toys")
-    for item, severity in zip(result["findings"], ("High", "Medium", "Low")):
+    for item, severity in zip(result["findings"], ("High", "Medium", "Low"), strict=True):
         item["severity"] = severity
     assessed = analyze(rig, create, result)
     device = client.headers["X-Device-ID"]
-    for index, finding in enumerate(assessed["findings"]):
+    for finding in assessed["findings"]:
         svc.work(device, assessed["id"], finding["annotation"]["id"])
     calls = list(provider.calls)
     for index, finding in enumerate(assessed["findings"]):

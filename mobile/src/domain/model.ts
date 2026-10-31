@@ -33,7 +33,7 @@ export const scenarios: { id: Scenario; title: string; description: string }[] =
     {
       id: "update-error",
       title: "Chat reply retry",
-      description: "Each chat reply fails once; manual retry succeeds.",
+      description: "Each chat reply stops partway once; retry replaces it.",
     },
     {
       id: "permission-denied",
@@ -223,12 +223,14 @@ export function recoverInterrupted(state: AppState): AppState {
               preview: {
                 ...f.localChat.preview,
                 turns: f.localChat.preview.turns.map((t) =>
-                  t.status === "running"
+                  t.status === "running" || t.status === "queued"
                     ? {
                         ...t,
                         status: "failed" as const,
                         error:
                           "The simulated reply was interrupted. Retry when ready.",
+                        error_code: "interrupted",
+                        version: (t.version ?? 0) + 1,
                       }
                     : t,
                 ),

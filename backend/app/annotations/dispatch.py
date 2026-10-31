@@ -49,6 +49,39 @@ class CloudTasksDispatcher:
                 retry=None,
             )
 
+    def enqueue_chat(self, device, assessment_id, finding_id, turn_id, attempt_id):
+        from app.assessments.chat import TASK_DEADLINE_SECONDS
+
+        config = self.settings
+        with tasks_v2.CloudTasksClient() as client:
+            client.create_task(
+                parent=config.annotation_tasks_queue,
+                task={
+                    "http_request": {
+                        "http_method": tasks_v2.HttpMethod.POST,
+                        "url": config.annotation_worker_url + "/internal/chat/work",
+                        "headers": {"Content-Type": "application/json"},
+                        "body": json.dumps(
+                            {
+                                "version": 1,
+                                "owner_uid": device,
+                                "assessment_id": assessment_id,
+                                "finding_id": finding_id,
+                                "turn_id": turn_id,
+                                "attempt_id": attempt_id,
+                            }
+                        ).encode(),
+                        "oidc_token": {
+                            "service_account_email": config.annotation_worker_service_account,
+                            "audience": config.annotation_worker_url,
+                        },
+                    },
+                    "dispatch_deadline": {"seconds": TASK_DEADLINE_SECONDS},
+                },
+                timeout=5,
+                retry=None,
+            )
+
 
 def worker_auth(request: Request):
     settings = request.app.state.settings
@@ -84,6 +117,29 @@ def work(body: Delivery, request: Request):
     return {"accepted": True}
 
 
+class ChatDelivery(BaseModel):
+    version: Literal[1]
+    owner_uid: str
+    assessment_id: str
+    finding_id: str
+    turn_id: str
+    attempt_id: str
+
+
+@worker_router.post("/internal/chat/work")
+def chat_work(body: ChatDelivery, request: Request):
+    # Always acknowledge: outcomes are persisted, and redelivery never re-runs a claim.
+    request.app.state.chat.work(
+        body.owner_uid,
+        body.assessment_id,
+        body.finding_id,
+        body.turn_id,
+        body.attempt_id,
+        request.state.request_id,
+    )
+    return {"accepted": True}
+
+
 @worker_router.post("/internal/annotations/recover")
 def recover(request: Request):
     if hasattr(request.app.state, "accounts"):
@@ -93,4 +149,5 @@ def recover(request: Request):
     for a in service.repository.annotation_pending():
         # Re-delivery is safe: expired claims become failed, never re-run.
         service.dispatch(a.owner_uid, a.id)
+    request.app.state.chat.recover()
     return {"accepted": True}

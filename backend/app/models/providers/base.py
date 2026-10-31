@@ -53,3 +53,52 @@ def http_model_error(response):
         else "upstream_http"
     )
     return ModelError(category, upstream_status=response.status_code)
+
+
+# Chat streaming contract: `stream_text(system=..., context=..., images=...,
+# max_output_tokens=...)` yields plain answer-text fragments and returns normally
+# only after the provider's explicit successful terminal event. Refusal,
+# truncation, early EOF, transport loss and provider failure raise ModelError.
+CHAT_STREAM_CATEGORIES = {
+    "refused",  # The model declined or a content filter stopped output.
+    "truncated",  # Output limit reached; partial text is not a complete answer.
+    "early_eof",  # Stream ended without a terminal event.
+    "provider_failed",  # Provider reported failure inside the stream.
+}
+
+
+def sse_events(response, limit=2_000_000):
+    """Parse `data:` lines of a server-sent event stream as JSON (`[DONE]` ends it)."""
+    import json
+
+    from app.errors import ModelError
+
+    total = 0
+    for line in response.iter_lines():
+        total += len(line)
+        if total > limit:
+            raise ModelError("invalid_response")
+        if not line.startswith("data:"):
+            continue
+        payload = line[5:].strip()
+        if payload == "[DONE]":
+            yield None
+            return
+        try:
+            yield json.loads(payload)
+        except ValueError:
+            raise ModelError("invalid_response") from None
+
+
+def stream_errors(stream):
+    """Map transport failures during a stream to safe categories."""
+    import httpx
+
+    from app.errors import ModelError
+
+    try:
+        yield from stream
+    except httpx.TimeoutException:
+        raise ModelError("timeout") from None
+    except httpx.TransportError:
+        raise ModelError("transport") from None
