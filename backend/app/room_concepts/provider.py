@@ -33,7 +33,9 @@ def decode_image(payload):
     with warnings.catch_warnings():
         warnings.simplefilter("error", Image.DecompressionBombWarning)
         with Image.open(io.BytesIO(data)) as source:
-            if source.format not in {"JPEG", "PNG", "WEBP"} or source.is_animated:
+            if source.format not in {"JPEG", "PNG", "WEBP"} or getattr(
+                source, "is_animated", False
+            ):
                 raise ValueError("Unsupported image")
             if source.width * source.height > MAX_PIXELS:
                 raise ValueError("Image too large")
