@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -30,6 +31,22 @@ class ModelProvider(Protocol):
         """
         ...
 
+    def stream_text(
+        self,
+        *,
+        system: str,
+        context: dict,
+        images: list[ImageInput],
+        max_output_tokens: int,
+    ) -> Iterator[str]:
+        """Yield plain answer-text fragments for finding chat.
+
+        Return normally only after the provider's explicit success event. Raise
+        ModelError (refused, truncated, early_eof, provider_failed, timeout,
+        transport, context_limit, ...) otherwise; never retry.
+        """
+        ...
+
     def close(self) -> None: ...
 
 
@@ -53,18 +70,6 @@ def http_model_error(response):
         else "upstream_http"
     )
     return ModelError(category, upstream_status=response.status_code)
-
-
-# Chat streaming contract: `stream_text(system=..., context=..., images=...,
-# max_output_tokens=...)` yields plain answer-text fragments and returns normally
-# only after the provider's explicit successful terminal event. Refusal,
-# truncation, early EOF, transport loss and provider failure raise ModelError.
-CHAT_STREAM_CATEGORIES = {
-    "refused",  # The model declined or a content filter stopped output.
-    "truncated",  # Output limit reached; partial text is not a complete answer.
-    "early_eof",  # Stream ended without a terminal event.
-    "provider_failed",  # Provider reported failure inside the stream.
-}
 
 
 def sse_events(response, limit=2_000_000):

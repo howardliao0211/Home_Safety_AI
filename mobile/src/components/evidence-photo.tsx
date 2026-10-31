@@ -64,13 +64,15 @@ export function EvidencePhoto({
       : undefined;
   const size = natural ?? dimensions;
   const ratio = size ? size.width / size.height : 4 / 3;
-  // Masks made for another image size would be misaligned; omit them.
+  // Masks made for another image shape would be misaligned; omit them. Compare
+  // aspect ratios, since platforms may report scaled natural sizes.
   const aligned = natural
     ? masks.filter(
         (m) =>
           !m.width ||
           !m.height ||
-          (m.width === natural.width && m.height === natural.height),
+          Math.abs(m.width / m.height - natural.width / natural.height) <
+            0.01 * (natural.width / natural.height),
       )
     : [];
   const canvas = (

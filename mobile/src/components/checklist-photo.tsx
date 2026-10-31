@@ -56,27 +56,34 @@ export function ChecklistPhoto({ assessment }: { assessment: Assessment }) {
   const overview = overviewHighlights(assessment);
   const [loaded, setLoaded] = useState<Record<string, string | null>>({});
   const requested = useRef(new Set<string>());
+  const mounted = useRef(true);
+  const [retryRound, setRetryRound] = useState(0);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const ids = overview.masks.map((m) => m.annotationId).join(",");
   useEffect(() => {
-    let active = true;
-    // Each mask loads independently; one failure never hides the others.
+    // Each mask loads independently; one failure never hides the others. Loads
+    // started in an earlier round still land, so a re-run never drops them.
     for (const mask of overview.masks) {
       if (requested.current.has(mask.annotationId)) continue;
       requested.current.add(mask.annotationId);
       const finding = assessment.findings.find((f) => f.id === mask.findingId)!;
       loadMask(assessment, finding, mask.annotationId)
         .then((uri) => {
-          if (active) setLoaded((m) => ({ ...m, [mask.annotationId]: uri }));
+          if (mounted.current)
+            setLoaded((m) => ({ ...m, [mask.annotationId]: uri }));
         })
         .catch(() => {
           requested.current.delete(mask.annotationId);
-          if (active) setLoaded((m) => ({ ...m, [mask.annotationId]: null }));
+          if (mounted.current)
+            setLoaded((m) => ({ ...m, [mask.annotationId]: null }));
         });
     }
-    return () => {
-      active = false;
-    };
-  }, [ids]);
+  }, [ids, retryRound]);
   const failed = overview.masks.filter((m) => loaded[m.annotationId] === null);
   // Observe pending attempts (and retry failed mask reads) only while focused and active.
   const pending = overview.pending || failed.length > 0;
@@ -92,13 +99,8 @@ export function ChecklistPhoto({ assessment }: { assessment: Assessment }) {
         } catch {
           /* Saved state stays visible; the next tick retries the read. */
         }
-        failed.forEach((m) => requested.current.delete(m.annotationId));
-        if (failed.length)
-          setLoaded((current) => {
-            const next = { ...current };
-            failed.forEach((m) => delete next[m.annotationId]);
-            return next;
-          });
+        // Failed masks stay reported until a re-read succeeds.
+        if (failed.length) setRetryRound((round) => round + 1);
         if (!stopped) timer = setTimeout(() => void tick(), POLL_MS);
       };
       timer = setTimeout(() => void tick(), POLL_MS);

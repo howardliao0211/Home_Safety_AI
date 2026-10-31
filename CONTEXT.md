@@ -37,6 +37,11 @@ a category, severity, evidence, recommendation, uncertainty, and status;
 **Household profile**: Optional context identifying household members whose
 needs may affect the assessment, such as an older adult, child, infant, or pet.
 
+**Suggestions**: Exactly three short, plain-text priorities saved with a new
+assessment's initial analysis when it has findings (none when it has no findings),
+using household profiles and details where relevant. They are never regenerated.
+Older records keep their original prose summary instead.
+
 **Household details**: Optional free text (up to 3,000 characters) describing the
 household, such as ages, mobility needs or pets. Trimmed and frozen into one
 assessment at creation; supplied to the model as context separate from household
