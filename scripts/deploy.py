@@ -27,6 +27,7 @@ REGIONAL_TYPES = {
     "google_storage_bucket": "location",
     "google_cloud_tasks_queue": "location",
     "google_artifact_registry_repository": "location",
+    "google_cloud_scheduler_job": "region",
 }
 
 

@@ -175,7 +175,9 @@ def region_teardown(terraform, extra, account, env):
     subprocess.run(plan_command, env=env, check=True)
     changes = inspect_plan(terraform, "region-teardown.tfplan", env)
     plan = read_plan(terraform, "region-teardown.tfplan", env)
-    deleted = [c for c in changes if c["change"]["actions"] != ["no-op"]]
+    deleted = [
+        c for c in changes if c.get("mode") != "data" and c["change"]["actions"] != ["no-op"]
+    ]
     outside = [
         c["address"]
         for c in deleted
@@ -399,7 +401,8 @@ def main() -> int:
                 "google_secret_manager_secret",
             }
             if any(
-                c.get("type") in dependencies and c["change"]["actions"] == ["delete"]
+                # Replacement deletes too, e.g. a region or bucket-name change.
+                c.get("type") in dependencies and "delete" in c["change"]["actions"]
                 for c in changes
             ):
                 raise RuntimeError(
