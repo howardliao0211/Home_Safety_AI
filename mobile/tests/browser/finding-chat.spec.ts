@@ -168,7 +168,10 @@ test("draft storage failure recovers without masking later reply announcements",
   await expect(
     page.getByText("Draft storage unavailable", { exact: true }),
   ).toHaveCount(0);
-  await expect(page.getByText(/Draft saved on this device/)).toBeVisible();
+  await expect(page.getByText(/Draft could not save|Saving draft/)).toHaveCount(
+    0,
+  );
+  await expect(page.getByText(/Draft saved on this device/)).toHaveCount(0);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(
     page.getByText("Reply available.", { exact: true }),

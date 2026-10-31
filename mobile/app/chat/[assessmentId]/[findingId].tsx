@@ -458,12 +458,8 @@ function Chat({ aid, fid }: { aid: string; fid: string }) {
           />
           <Copy kind="small">
             {draft.length.toLocaleString()} /{" "}
-            {MAX_CHAT_QUESTION.toLocaleString()} characters ·{" "}
-            {draftError
-              ? "Draft could not save"
-              : draft === (finding.localChat?.draft ?? "")
-                ? "Draft saved on this device"
-                : "Saving draft…"}
+            {MAX_CHAT_QUESTION.toLocaleString()} characters
+            {draftError ? " · Draft could not save" : ""}
           </Copy>
           <Button
             label="Send"
