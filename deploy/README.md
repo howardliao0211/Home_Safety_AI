@@ -55,7 +55,7 @@ npm --prefix mobile ci
 npm install --global firebase-tools
 gcloud auth login
 firebase login
-backend/.venv/bin/python scripts/deploy-web.py
+backend/.venv/bin/python scripts/deploy-web.py start
 ```
 
 Use the same Google account/project for both CLIs. The backend Python environment
@@ -90,6 +90,12 @@ links. By default the demo URL is `https://home-safety-ai.web.app`.
 Options:
 
 ```bash
+# Take the website offline (disable Firebase Hosting traffic).
+backend/.venv/bin/python scripts/deploy-web.py stop
+
+# Build and publish again to bring the website back online.
+backend/.venv/bin/python scripts/deploy-web.py start
+
 # Build locally without contacting or changing cloud services.
 # EXPO_PUBLIC_API_URL must already point to the cloud backend.
 backend/.venv/bin/python scripts/deploy-web.py --build-only
@@ -100,6 +106,13 @@ backend/.venv/bin/python scripts/deploy-web.py \
   --service home-safety-demo --region australia-southeast1 \
   --account operator@example.com
 ```
+
+Omitting the action still defaults to `start`. `stop` uses the same project/site
+defaults and accepts `--project` and `--site` overrides. It requires the Firebase
+CLI and its Hosting update permission, but does not need Node, gcloud, a running
+backend or production web build settings. It disables traffic without deleting
+the Hosting site, backend, accounts or assessment data. Authentication domains and
+CORS settings are retained for the next start. `--build-only` applies only to `start`.
 
 Region defaults to the existing guided deployment's saved region, then Sydney.
 For a different Firebase project, supply that project's Firebase web configuration

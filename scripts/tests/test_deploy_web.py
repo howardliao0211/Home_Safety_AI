@@ -18,6 +18,49 @@ SPEC.loader.exec_module(web)
 
 
 class WebDeploymentTests(unittest.TestCase):
+    def test_stop_only_disables_the_selected_hosting_site(self):
+        for flags, project, site in (
+            ([], "example", "example"),
+            (["--project", "other-project", "--site", "custom-site"],
+             "other-project", "custom-site"),
+        ):
+            with self.subTest(flags=flags), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "mobile").mkdir()
+                (root / "mobile/eas.json").write_text(json.dumps({"build": {"preview": {
+                    "env": {"EXPO_PUBLIC_FIREBASE_PROJECT_ID": "example"},
+                }}}))
+                with (
+                    patch.object(web, "ROOT", root),
+                    patch.object(web.sys, "argv", ["deploy-web.py", "stop", *flags]),
+                    patch.dict(os.environ, {}, clear=True),
+                    patch.object(web.shutil, "which",
+                                 side_effect=lambda tool: tool if tool == "firebase" else None),
+                    patch.object(web, "run") as run,
+                    patch.object(web, "cloud_json") as cloud,
+                    patch.object(web, "build_environment") as build,
+                    patch.object(web.httpx, "Client") as client,
+                ):
+                    web.main()
+                run.assert_called_once_with([
+                    "firebase", "hosting:disable", f"--project={project}",
+                    f"--site={site}", "--force", "--non-interactive",
+                ])
+                cloud.assert_not_called()
+                build.assert_not_called()
+                client.assert_not_called()
+                self.assertFalse((root / ".env").exists())
+
+    def test_stop_rejects_build_only_before_running_commands(self):
+        with (
+            patch.object(web.sys, "argv", ["deploy-web.py", "stop", "--build-only"]),
+            patch.object(web, "run") as run,
+            self.assertRaises(SystemExit) as error,
+        ):
+            web.main()
+        self.assertEqual(error.exception.code, 2)
+        run.assert_not_called()
+
     def test_build_excludes_emulators_and_unapproved_public_config(self):
         settings = {
             "EXPO_PUBLIC_FIREBASE_API_KEY": "cloud-public-key",

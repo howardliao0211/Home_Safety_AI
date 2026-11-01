@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the existing Expo app and publish a Firebase Hosting browser demo.
+"""Start (build and publish) or stop the Firebase Hosting browser demo.
 
 Run with backend/.venv/bin/python (python-dotenv and httpx are required).
 """
@@ -196,6 +196,8 @@ def configure_cloud(args, client, service, settings, domains):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", nargs="?", choices=("start", "stop"), default="start",
+                        help="start deploys the website (default); stop disables Hosting traffic")
     parser.add_argument("--project", default=None, help="Defaults to the configured Firebase project")
     parser.add_argument("--site", help="Hosting site ID; defaults to project ID")
     parser.add_argument("--service", default="home-safety-demo")
@@ -203,6 +205,8 @@ def main():
     parser.add_argument("--account", help="gcloud operator account")
     parser.add_argument("--build-only", action="store_true", help="Build locally; do not contact or modify cloud services")
     args = parser.parse_args()
+    if args.action == "stop" and args.build_only:
+        parser.error("--build-only can only be used with start.")
     defaults = json.loads((ROOT / "mobile/eas.json").read_text())["build"]["preview"]["env"]
     settings = {**defaults, **dotenv_values(ROOT / ".env"), **os.environ}
     args.project = args.project or settings.get("EXPO_PUBLIC_FIREBASE_PROJECT_ID")
@@ -210,6 +214,15 @@ def main():
     for value in (args.project, args.site):
         if not value or not re.fullmatch(r"[a-z][a-z0-9-]{3,62}", value):
             parser.error("Use valid production --project and --site IDs.")
+    if args.action == "stop":
+        if not shutil.which("firebase"):
+            parser.error("Missing firebase. See deploy/README.md#browser-demo.")
+        print(f"Stopping Hosting: project {args.project}, site {args.site}.", flush=True)
+        run(["firebase", "hosting:disable", f"--project={args.project}",
+             f"--site={args.site}", "--force", "--non-interactive"])
+        print("Website stopped. Backend, accounts, data and browser access settings are retained. "
+              "Run start to build and publish again.")
+        return
     saved_file = ROOT / "deploy/terraform/deploy.tfvars.json"
     saved = json.loads(saved_file.read_text()) if saved_file.exists() else {}
     args.region = args.region or saved.get("region", "australia-southeast1")
