@@ -239,6 +239,21 @@ def test_candidate_failure_does_not_promote_or_expose_secrets(config):
     assert "ENVIRONMENT=production" in env and "EMULATOR" not in env
 
 
+def test_release_retains_hosted_web_origins_with_safe_gcloud_delimiter(config, monkeypatch, tmp_path):
+    monkeypatch.setattr(deploy, "ROOT", tmp_path)
+    monkeypatch.delenv("CORS_ORIGINS", raising=False)
+    origins = ["https://demo.web.app", "https://demo.firebaseapp.com"]
+    (tmp_path / ".env").write_text("CORS_ORIGINS='" + json.dumps(origins) + "'\n")
+    runner = FakeRelease(config)
+    runner.release(model="qwen/test", image=config.repository + "/backend@sha256:" + "a" * 64)
+    command = next(command for command in runner.commands if "deploy" in command)
+    argument = next(arg for arg in command if arg.startswith("--set-env-vars="))
+    assert argument.startswith("--set-env-vars=^|^")
+    values = dict(item.split("=", 1) for item in argument.removeprefix("--set-env-vars=^|^").split("|"))
+    assert json.loads(values["CORS_ORIGINS"]) == origins
+    assert values["ENVIRONMENT"] == "production"
+
+
 def test_failure_after_promotion_restores_old_revision(config):
     runner = FakeRelease(config, fail_at="https://service.run.app")
     with pytest.raises(deploy.DeploymentError):

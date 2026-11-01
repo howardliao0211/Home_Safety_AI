@@ -44,6 +44,79 @@ tokens and scopes records/photos by the verified UID. Production API docs
 are disabled. Model credentials stay backend-only. The phone and highlight workers
 use Cloud Run's generated `https://...run.app` service URL with managed HTTPS.
 
+## Browser demo
+
+Publish the existing Expo frontend to Firebase Hosting, connected to the running
+Cloud Run backend:
+
+```bash
+source scripts/frontend-env.sh
+npm --prefix mobile ci
+npm install --global firebase-tools
+gcloud auth login
+firebase login
+backend/.venv/bin/python scripts/deploy-web.py
+```
+
+Use the same Google account/project for both CLIs. The backend Python environment
+must already be installed (`cd backend && uv sync --extra dev --locked`). Set
+`EXPO_PUBLIC_FIREBASE_API_KEY` to the cloud Firebase web app's public API key in
+root `.env`. App ID, auth domain and project default to `mobile/eas.json`'s preview
+configuration; explicit `.env`/environment values override those defaults. All
+Firebase values must belong to the selected project. Local emulator settings are
+excluded from the build. API keys for Muse remain backend-only.
+
+The script discovers the live backend URL, builds into `.tools/web-demo/dist`,
+creates the Hosting site if missing, adds its two Firebase domains to Authentication,
+merges those origins into backend CORS, and deploys only Hosting. It needs Hosting
+administration, Identity Platform config read/update and Cloud Run service
+read/update permissions, plus permission to use the backend service account.
+It refuses staged or split backend traffic. Do not run it concurrently with other
+deployments or authentication configuration changes.
+
+CORS changes create a Cloud Run revision and are saved in ignored root `.env` so
+later backend releases retain them. Keep that setting when moving checkouts or
+deploying from CI. Rerunning is supported and preserves other origins/domains.
+The script verifies CORS on the newly created revision before directing traffic
+to it; Cloud Run's latest-ready field can still identify the previous revision
+when traffic is pinned. Preflight checks briefly wait for routing propagation.
+If an earlier attempt saved CORS without activating its revision, a rerun checks
+the serving revision and activates the saved revision after verifying its origins.
+Failures leave completed changes in place; fix the reported step and rerun.
+An existing selected Hosting site's content is replaced when publication succeeds.
+The generated single-page routing configuration supports page refreshes and direct
+links. By default the demo URL is `https://home-safety-ai.web.app`.
+
+Options:
+
+```bash
+# Build locally without contacting or changing cloud services.
+# EXPO_PUBLIC_API_URL must already point to the cloud backend.
+backend/.venv/bin/python scripts/deploy-web.py --build-only
+
+# Override the project, site, backend service, region or gcloud account.
+backend/.venv/bin/python scripts/deploy-web.py \
+  --project home-safety-ai --site home-safety-ai-demo \
+  --service home-safety-demo --region australia-southeast1 \
+  --account operator@example.com
+```
+
+Region defaults to the existing guided deployment's saved region, then Sydney.
+For a different Firebase project, supply that project's Firebase web configuration
+as well. The backend must authenticate against the same project. Custom domains
+are not provisioned by this script.
+
+After deployment, the script checks Hosting HTML, API health and authenticated-request
+CORS preflights. Open the printed link and verify sign-in, photo selection, an
+assessment, finding chat, history, and refreshing an assessment page. These smoke
+checks do not prove a complete user journey or real-model quality. Use a verified
+demo account; model calls occur through the existing backend.
+
+References: [Expo web export](https://docs.expo.dev/deploy/web/),
+[Firebase Hosting](https://firebase.google.com/docs/hosting/quickstart),
+[Identity Platform configuration](https://cloud.google.com/identity-platform/docs/reference/rest/v2/projects/updateConfig),
+and [Cloud Run environment settings](https://cloud.google.com/run/docs/configuring/services/environment-variables).
+
 ## Build and provision
 
 ### Guided deployment script

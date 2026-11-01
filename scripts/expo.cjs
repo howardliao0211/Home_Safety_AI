@@ -7,7 +7,9 @@ const { spawn } = require("node:child_process");
 
 const mobile = resolve(__dirname, "../mobile");
 try {
-  const values = parseEnv(readFileSync(resolve(__dirname, "../.env"), "utf8"));
+  const values = process.env.EXPO_NO_DOTENV === "1"
+    ? {}
+    : parseEnv(readFileSync(resolve(__dirname, "../.env"), "utf8"));
   for (const [key, value] of Object.entries(values)) {
     if (key.startsWith("EXPO_PUBLIC_") && process.env[key] === undefined) {
       process.env[key] = value;

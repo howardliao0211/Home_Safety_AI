@@ -295,6 +295,14 @@ class Deployer:
             "PHOTOS_BUCKET": self.config.photos_bucket,
             "BACKEND_SOURCE_HASH": source_hash() if built_here else "external-image",
         }
+        cors = os.environ.get("CORS_ORIGINS", dotenv_values(ROOT / ".env").get("CORS_ORIGINS"))
+        if cors is not None:
+            origins = json.loads(cors)
+            if (not isinstance(origins, list)
+                    or any(not isinstance(origin, str) or "|" in origin or origin == "*"
+                           for origin in origins)):
+                raise DeploymentError("CORS_ORIGINS must be a JSON array of explicit origins without '|'.")
+            environment["CORS_ORIGINS"] = json.dumps(origins, separators=(",", ":"))
         if image_model:
             environment["MUSE_IMAGE_GEN_MODEL"] = image_model
         if self.config.annotation_worker_url:
@@ -342,7 +350,7 @@ class Deployer:
             "--cpu-throttling",
             f"--revision-suffix={release_id}",
             f"--tag={release_id}",
-            "--set-env-vars=" + ",".join(f"{key}={value}" for key, value in environment.items()),
+            "--set-env-vars=^|^" + "|".join(f"{key}={value}" for key, value in environment.items()),
             (f"--set-secrets={secret_bindings}"),
             "--format=json",
         ]

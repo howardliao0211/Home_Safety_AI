@@ -176,7 +176,9 @@ export function RoomConceptViewer({ assessment }: { assessment: Assessment }) {
           <Copy kind="heading" accessibilityRole="header">
             Generated room concept
           </Copy>
-          <Copy accessibilityLiveRegion="polite">{status}</Copy>
+          {concept?.state !== "ready" && (
+            <Copy accessibilityLiveRegion="polite">{status}</Copy>
+          )}
           {!!observationError && (
             <Notice title="Connection unavailable">
               <Copy>{observationError}</Copy>
