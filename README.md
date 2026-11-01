@@ -13,6 +13,10 @@ of pretending to be certain.
 > from visible information only and do not replace a professional home safety
 > inspection.
 
+## Official demonstration
+
+[Watch the official Home Safety AI demonstration on YouTube](https://youtu.be/X94i9awvnf0).
+
 ## Why it is different
 
 | | Feature | What it means |
