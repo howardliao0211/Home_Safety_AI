@@ -62,51 +62,6 @@ evidence can revise the explanation, while the user's status and notes remain
 theirs. A result with no obvious visible hazards is always presented as a
 limited observation—not a declaration that the room is safe.
 
-## Try the experience
-
-### Fast path: simulated preview
-
-Preview mode runs entirely on the frontend with predefined scenarios, so it
-does not require Docker, cloud credentials, or a model API key.
-
-```bash
-nvm use
-cd mobile
-npm ci
-EXPO_PUBLIC_DATA_SOURCE=preview npm run web
-```
-
-Open <http://localhost:8081>, choose **Start with a room**, and use a bundled
-sample or your own photo. The development preview selector includes everyday
-hazards, uncertain findings, a qualified no-hazards result, and recoverable
-failure scenarios. Preview results are simulated and do not analyse the chosen
-photo.
-
-### Full path: connected AI stack
-
-The connected experience runs Expo, FastAPI, the storage emulators, and the
-independent highlight worker together.
-
-1. Install the prerequisites listed below.
-2. Copy `.env.example` to `.env` if a root `.env` does not already exist.
-3. Add either Meta Muse or Groq credentials to `.env`; never place model keys in
-   frontend configuration.
-4. Start the stack from the repository root:
-
-```bash
-python3 scripts/local-test.py start
-```
-
-Open <http://localhost:8081> when the script reports ready. Logs are written to
-`.tools/local-test/`. Stop all managed services gracefully with:
-
-```bash
-python3 scripts/local-test.py stop
-```
-
-Graceful shutdown preserves emulator data. See the
-[local stack guide](docs/test/local-stack.md) for logs and troubleshooting.
-
 ## How it is built
 
 ```mermaid
@@ -142,48 +97,52 @@ flowchart LR
 
 ## Prerequisites
 
-- Git and a local checkout of this repository.
-- Node.js **24.22.1**, pinned in [`.nvmrc`](.nvmrc), with its bundled npm.
-- Python **3.10+** and [uv](https://docs.astral.sh/uv/) for the backend.
-- Docker Engine with Compose for the Firestore and photo-storage emulators.
-- A browser for web preview.
-- Optional: an Android phone with an Expo Go version compatible with Expo SDK
-  **58**, or Android Studio for an emulator.
+Use a Linux or WSL terminal with Bash for the local and deployment scripts.
+Start from a local checkout of this repository, with Git installed.
 
-On WSL, run Linux Node and npm inside WSL and enable Docker Desktop integration
-for the distribution. Browser preview and a physical phone using Expo Go do not
-require Android Studio.
+| Tool or account | Required for |
+| --- | --- |
+| Node.js **24.22.1** (pinned in [`.nvmrc`](.nvmrc)) and bundled npm | Frontend development, tests, and web builds. The commands below use [nvm](https://github.com/nvm-sh/nvm) to select this version. |
+| Python **3.10+** and [uv](https://docs.astral.sh/uv/) | Connected local stack, backend tests, and deployment scripts. |
+| Docker Engine or Docker Desktop with Compose v2 | Local Auth, Firestore, and photo-storage emulators; cloud container builds. Docker must be running. |
+| A browser | Local web testing and the hosted web app. |
+| Meta Muse or Groq API credentials | Real AI assessments locally. The guided cloud deployment uses Muse. Preview and automated tests do not need model credentials. |
+| Google Cloud project with billing, Google Cloud CLI (`gcloud`), Terraform **>=1.14 and <2**, and Firebase CLI | Cloud deployment only; see [Deploy on GCP + Firebase](#deploy-on-gcp--firebase). |
 
-### Install frontend dependencies
+On WSL, use Linux Node and npm inside WSL and enable Docker Desktop integration
+for the distribution. An Android phone with an Expo Go version compatible with
+Expo SDK **58**, or Android Studio with an emulator, is optional. Neither is
+needed for browser testing.
+
+## Deploy Locally
+
+These instructions run the development stack on your machine. Run every command
+below from the repository root unless stated otherwise.
+
+### 1. Install dependencies
 
 ```bash
 nvm install
 nvm use
-cd mobile
-npm ci
-```
-
-`npm ci` must run in `mobile/`; there is no root npm project. This checkout may
-also contain an ignored, project-local Node runtime. To use it when available:
-
-```bash
-source scripts/frontend-env.sh
-cd mobile
-npm ci
-```
-
-The script selects the project-local runtime when present and otherwise uses
-Node from `PATH`; it does not install Node.
-
-### Install backend dependencies
-
-```bash
+npm --prefix mobile ci
+uv sync --project backend --extra dev --locked
 docker compose version
-cd backend
-uv sync --extra dev --locked
 ```
 
-Configure one model provider in the root `.env`:
+There is no root npm project; frontend dependencies live in `mobile/`. If you
+already have a compatible Node installation, you can skip the nvm commands.
+An ignored project-local runtime, when available, can instead be selected with
+`source scripts/frontend-env.sh`; that script does not install Node.
+
+### 2. Configure the local environment
+
+If a root `.env` does not already exist, create it from the supplied template:
+
+```bash
+cp -n .env.example .env
+```
+
+Edit `.env` and replace the model credentials. For Muse:
 
 ```dotenv
 MODEL_PROVIDER=muse
@@ -191,47 +150,173 @@ MUSE_API_KEY=your-meta-api-key
 MUSE_MAIN_MODEL=muse-wonder-1.0
 ```
 
-To use Groq, set `MODEL_PROVIDER=groq`, `GROQ_API_KEY`, and `GROQ_MODEL` instead.
-See the [backend guide](backend/README.md#start-locally) for the full provider,
-storage, and HTTP contract.
+Alternatively, set `MODEL_PROVIDER=groq`, `GROQ_API_KEY`, and `GROQ_MODEL`.
+There is no automatic provider fallback. Leave `MUSE_IMAGE_GEN_MODEL` empty
+unless you want optional room concepts and have access to an image model.
+Highlights require the Muse provider and `MUSE_SEGMENTATION_MODEL`; set
+`MUSE_SEGMENTATION_MODEL=` to disable them.
 
-### Configure the connected frontend
+Keep the template's local storage and Firebase emulator settings, including
+`GOOGLE_CLOUD_PROJECT=home-safety-local`,
+`FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099`, and the matching
+`EXPO_PUBLIC_FIREBASE_PROJECT_ID=home-safety-local`. No cloud project, Firebase
+registration, or Google Cloud login is needed locally. Model keys stay in the
+ignored root `.env`; never give them an `EXPO_PUBLIC_` prefix.
 
-The root `.env` is shared by the launch scripts. Public client values are safe
-to expose; model credentials are not.
+### 3. Start the app and verify an account
 
-```dotenv
-EXPO_PUBLIC_DATA_SOURCE=api
-EXPO_PUBLIC_API_URL=http://127.0.0.1:8000
-EXPO_PUBLIC_AUTH_EMULATOR_URL=http://127.0.0.1:9099
-EXPO_PUBLIC_FIREBASE_PROJECT_ID=home-safety-local
-EXPO_PUBLIC_FIREBASE_API_KEY=local-emulator-key
-EXPO_PUBLIC_FIREBASE_APP_ID=home-safety-local
+```bash
+python3 scripts/local-test.py start
 ```
 
-Register and verify an email/password account before accessing assessments.
-Restart Expo after changing configuration. Physical phones need a reachable API
-URL rather than `127.0.0.1`; see [frontend development](docs/frontend-development.md)
-and [account setup](docs/authentication.md).
+This starts the Auth, Firestore, and photo-storage emulators, FastAPI, the
+chat/highlight worker, and Expo. Services run in the background after the command
+returns. Initial startup needs network access to download container images and
+emulator dependencies. Keep ports **9099**, **8080**, **4443**, **8000**, and
+**8081** available.
 
-## Quality and safety by design
+1. Open <http://localhost:8081>. API health is at <http://127.0.0.1:8000/health>.
+2. Register an email/password account in the app and request email verification.
+3. Find the verification link in the Auth emulator logs:
 
-- The server accepts findings only through a strict, validated schema.
-- Findings are capped, severity-ordered, and paired one-to-one with checklist
-  actions.
-- Uncertainty is a required part of every finding, not hidden metadata.
-- A later photo cannot silently mark a finding resolved; the user makes the final
-  call.
-- Dangerous DIY instructions are excluded in favour of leaving the area or
-  seeking qualified help where appropriate.
-- Failed initial analysis is shown as a failure with Retry, never as an empty
-  or successful assessment.
-- Model credentials, raw image payloads, and private photos stay out of logs.
+   ```bash
+   docker compose -f backend/compose.yaml logs auth
+   ```
 
-Automated coverage includes frontend state and browser journeys, backend
-workflows, authentication and ownership, provider boundaries, Firestore/GCS
-round trips, highlight recovery, container behaviour, and deployment tooling.
-See [testing guides](docs/test/README.md) for commands and manual device checks.
+4. Open the link, then return to the app and refresh or sign in again. Emulator
+   emails are not sent to a real mailbox.
+5. Select a bundled room or upload a photo, run an assessment, try finding chat,
+   and update a checklist item. Connected AI requests consume provider quota.
+
+Logs are in `.tools/local-test/` (`backend.log`, `worker.log`, and
+`frontend.log`). Keep the worker running for chat replies and highlights.
+Restart Expo after changing client configuration. This launcher uses loopback
+addresses for browser testing; for phones, follow
+[frontend development](docs/frontend-development.md) and
+[account setup](docs/authentication.md#local-development).
+
+Stop the stack gracefully to preserve emulator accounts, assessments, and photos:
+
+```bash
+python3 scripts/local-test.py stop
+```
+
+See the [local stack guide](docs/test/local-stack.md) for troubleshooting and the
+[backend guide](backend/README.md#start-locally) for manual service startup.
+
+### Optional: frontend preview without an API
+
+With frontend dependencies installed, run:
+
+```bash
+python3 scripts/local-test.py start --preview
+```
+
+Open <http://localhost:8081>. Preview uses predefined scenarios and does not
+analyse your photo; it needs no backend dependencies, Docker, `.env`, accounts,
+or model key. Stop it with `python3 scripts/local-test.py stop` before switching
+to the connected stack.
+
+## Deploy on GCP + Firebase
+
+The backend runs on **Cloud Run**, with Firestore, private GCS photos, and
+Cloud Tasks/Scheduler workers. **Firebase Authentication** supplies accounts and
+**Firebase Hosting** serves the exported Expo web app. Deployment defaults to
+project `home-safety-ai` and region `australia-southeast1` (Sydney); review the
+[deployment guide](deploy/README.md) for project configuration, required IAM
+permissions, release verification, and rollback before provisioning.
+
+### 1. Prepare tools, Firebase, and credentials
+
+Install the shared dependencies above plus gcloud, Terraform, and the Firebase
+CLI. From the repository root:
+
+```bash
+nvm use
+npm --prefix mobile ci
+uv sync --project backend --extra dev --locked
+npm install --global firebase-tools
+gcloud auth login
+firebase login
+```
+
+Use the same Google account and project for both CLIs, with billing enabled and
+permissions to provision and release the resources listed in the deployment
+guide. Before running the guided deployment:
+
+1. Add Firebase to the target GCP project, enable email/password authentication,
+   and register a Firebase **web app** in that project.
+2. Create and verify a test account for deployment checks. See
+   [authentication setup](docs/authentication.md#deployment) for provider setup,
+   email actions, and account requirements.
+3. Create the ignored root `.env` if needed and set the values below using that
+   project's Firebase web configuration and your verified test account:
+
+   ```dotenv
+   MODEL_PROVIDER=muse
+   MUSE_API_KEY=your-meta-api-key
+   MUSE_MAIN_MODEL=muse-wonder-1.0
+   EXPO_PUBLIC_DATA_SOURCE=api
+   EXPO_PUBLIC_FIREBASE_PROJECT_ID=home-safety-ai
+   EXPO_PUBLIC_FIREBASE_API_KEY=your-firebase-web-api-key
+   EXPO_PUBLIC_FIREBASE_APP_ID=your-firebase-web-app-id
+   EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=home-safety-ai.firebaseapp.com
+   HOME_SAFETY_SMOKE_EMAIL=your-verified-test-account-email
+   HOME_SAFETY_SMOKE_PASSWORD=your-test-account-password
+   ```
+
+Remove local emulator settings from the cloud configuration, including
+`FIREBASE_AUTH_EMULATOR_HOST`, `FIRESTORE_EMULATOR_HOST`,
+`STORAGE_EMULATOR_HOST`, and `EXPO_PUBLIC_AUTH_EMULATOR_URL`. Replace the local
+Firebase values with cloud values; keep a private copy of your local settings
+if you plan to switch back. Test-account credentials and model keys stay private.
+
+### 2. Deploy the backend
+
+```bash
+python3 scripts/deploy.py start
+```
+
+Review the Terraform plans and enter the confirmations requested by the script.
+It provisions infrastructure, stores model secrets, releases and verifies the API,
+configures workers, and writes the current Cloud Run URL to `.env` as
+`EXPO_PUBLIC_API_URL`. Re-running `start` updates the deployment. Keep the
+checkout's ignored Terraform state and private backups for future operations.
+
+### 3. Publish the web app to Firebase Hosting
+
+Once the backend deployment succeeds:
+
+```bash
+backend/.venv/bin/python scripts/deploy-web.py start
+```
+
+The script discovers the backend URL, exports the frontend, configures Hosting
+authentication domains and API CORS, deploys Hosting, and prints the public URL.
+It checks Hosting, API health, and CORS. Open that URL and verify sign-in, photo
+selection, an assessment, finding chat, history, and a page refresh yourself.
+See the [browser deployment guide](deploy/README.md#browser-demo) for project/site
+overrides and build-only operation. For Expo Go against the cloud backend, use
+`python3 scripts/deploy.py start --stage finish --start-expo`.
+
+### Stop hosting or remove cloud resources
+
+To take the website offline while retaining the backend and saved data:
+
+```bash
+backend/.venv/bin/python scripts/deploy-web.py stop
+```
+
+To destroy the managed backend infrastructure and its stored assessments/photos:
+
+```bash
+python3 scripts/deploy.py stop
+```
+
+Backend teardown requires a typed confirmation and does not disable Firebase
+Hosting or remove Firebase accounts. Cloud resources can incur charges until
+removed; there is no automatic teardown. Follow the
+[deployment guide](deploy/README.md#explicit-teardown) for teardown details.
 
 ## Project map
 
@@ -246,22 +331,6 @@ See [testing guides](docs/test/README.md) for commands and manual device checks.
 | [`scripts/local-test.py`](scripts/local-test.py) | Local frontend, API, worker, and emulator orchestration |
 | [`deploy/terraform/`](deploy/terraform/) | Cloud Run, storage, registry, queue, and IAM infrastructure |
 | [`docs/test/`](docs/test/) | Automated checks, manual journeys, and device testing |
-
-## Deploy to GCP
-
-Provisioning and application releases are separate, guarded operations. Follow
-the [deployment guide](deploy/README.md) for one-time credentials, Terraform,
-release verification, traffic promotion, and rollback. The convenience wrapper
-at the repository root exposes the managed lifecycle:
-
-```bash
-export PATH="$PWD/bin:$PATH"
-deploy start
-deploy stop
-```
-
-`deploy stop` deletes infrastructure and stored assessments/photos only after a
-typed confirmation.
 
 ## Current scope
 
